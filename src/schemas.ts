@@ -131,7 +131,7 @@ export const searchDocsRoute = createRoute({
 export const codeConsultationRoute = createRoute({
   method: 'post',
   path: '/api/codeConsultation',
-  operationId: 'codeConsultation',
+  operationId: 'code_consultation',
   request: {
     body: {
       content: {
