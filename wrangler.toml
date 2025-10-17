@@ -1,4 +1,4 @@
-name = "cloudflare-worker-mcp-scaffold"
+name = "cloudflare-docs-mcp"
 main = "src/index.ts"
 compatibility_date = "2024-06-20"
 
