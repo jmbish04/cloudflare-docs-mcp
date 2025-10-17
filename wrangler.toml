@@ -1,0 +1,14 @@
+name = "cloudflare-worker-mcp-scaffold"
+main = "src/index.ts"
+compatibility_date = "2024-06-20"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "best-practices-db"
+database_id = "00000000-0000-0000-0000-000000000000" # TODO: replace with actual database id
+
+[vars]
+AI_MODEL = "@cf/openai/gpt-oss-120b"
+
+[observability]
+logs = "on"

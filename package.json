@@ -1,0 +1,21 @@
+{
+  "name": "cloudflare-worker-mcp-scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.4.3",
+    "@hono/zod-openapi": "^0.9.9",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "wrangler": "^3.47.0",
+    "@cloudflare/workers-types": "^4.20240512.0"
+  }
+}
