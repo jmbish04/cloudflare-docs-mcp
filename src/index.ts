@@ -102,6 +102,9 @@ function sendError(c: Context<{ Bindings: Bindings }>, error: unknown) {
   if (error instanceof HTTPException) {
     throw error;
   }
+  if (error instanceof ZodError) {
+    return c.json(ErrorSchema.parse({ error: 'Invalid request payload', details: error.flatten() }), 400);
+  }
 
   const message = error instanceof Error ? error.message : 'Unexpected error.';
   return c.json(ErrorSchema.parse({ error: message }), 500);
