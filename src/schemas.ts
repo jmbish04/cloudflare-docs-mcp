@@ -97,6 +97,7 @@ export type CodeConsultationResponse = z.infer<typeof CodeConsultationResponseSc
 export const searchDocsRoute = createRoute({
   method: 'post',
   path: '/api/searchDocs',
+  operationId: 'searchDocs',
   request: {
     body: {
       content: {
@@ -130,6 +131,7 @@ export const searchDocsRoute = createRoute({
 export const codeConsultationRoute = createRoute({
   method: 'post',
   path: '/api/codeConsultation',
+  operationId: 'codeConsultation',
   request: {
     body: {
       content: {
