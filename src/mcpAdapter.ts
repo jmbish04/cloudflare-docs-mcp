@@ -65,8 +65,8 @@ export class MCPAdapter {
     });
 
     if (!response.ok) {
-      // TODO: enrich error handling with structured diagnostics.
-      throw new Error(`Docs MCP proxy failed with status ${response.status}`);
+      const errorText = await response.text().catch(() => 'Could not read error body.');
+      throw new Error(`Docs MCP proxy failed with status ${response.status}: ${errorText}`);
     }
 
     const data = (await response.json()) as { response: SearchDocsResponse } | SearchDocsResponse;
