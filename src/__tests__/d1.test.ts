@@ -10,7 +10,7 @@ describe('D1 helpers', () => {
       ],
     });
     const prepare = vi.fn().mockReturnValue({ all });
-    const env = { DB: { prepare } as any };
+    const env = { DB: { prepare } as unknown as D1Database };
 
     const practices = await listBestPractices(env);
 
