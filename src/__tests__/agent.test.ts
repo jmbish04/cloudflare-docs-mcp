@@ -67,10 +67,10 @@ describe('ConsultationAgent', () => {
   });
 
   it('gracefully handles missing AI configuration', async () => {
-    const env = {
-      DB: {} as unknown,
+    const env: Partial<AgentEnv> = {
+      DB: {} as D1Database,
     };
-    const agent = new ConsultationAgent(env as any);
+    const agent = new ConsultationAgent(env as AgentEnv);
 
     const searchDocs = vi.fn().mockResolvedValue({
       results: [],
