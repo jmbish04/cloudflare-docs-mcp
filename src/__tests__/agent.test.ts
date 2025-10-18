@@ -30,12 +30,12 @@ describe('ConsultationAgent', () => {
   });
 
   it('runs a full consultation and captures clarifying questions', async () => {
-    const env = {
-      DB: {} as unknown,
+    const env: AgentEnv = {
+      DB: {} as D1Database,
       AI_MODEL: 'cf/meta',
       AI: { run: vi.fn().mockResolvedValue(['Have you enabled logs?']) },
     };
-    const agent = new ConsultationAgent(env as any);
+    const agent = new ConsultationAgent(env);
 
     const searchDocs = vi.fn().mockImplementation(async ({ query, topK }) => {
       expect(query).toBe(baseInput.consult_query);
