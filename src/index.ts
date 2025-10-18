@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { HTTPException } from 'hono/http-exception';
+import { ZodError } from 'zod';
 import { configureOpenAPIRoute } from './openapi';
 import { MCPAdapter, MCPAdapterEnv } from './mcpAdapter';
 import { ConsultationAgent, AgentEnv } from './agent';
