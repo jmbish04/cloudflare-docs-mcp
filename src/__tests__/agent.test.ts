@@ -7,6 +7,7 @@ vi.mock('../d1', () => ({
 }));
 
 import { ConsultationAgent } from '../agent';
+import type { AgentEnv } from '../agent';
 import { generateEmbedding, insertTransactionLog, listBestPractices } from '../d1';
 
 const listBestPracticesMock = listBestPractices as unknown as ReturnType<typeof vi.fn>;
