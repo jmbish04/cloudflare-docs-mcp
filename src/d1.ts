@@ -18,6 +18,16 @@ export interface TransactionLogRow {
   response_embedding: number[];
 }
 
+export interface ProductDocumentRow {
+  id: string;
+  product_id: string;
+  title: string;
+  url: string;
+  content: string;
+  embedding: number[];
+  last_synced_at: string;
+}
+
 export async function insertBestPractice(env: D1Env, entry: Omit<BestPracticeRow, 'id'> & { id?: string }) {
   const id = entry.id ?? crypto.randomUUID();
   await env.DB.prepare(
@@ -63,6 +73,68 @@ export async function insertTransactionLog(
     .run();
 
   return { ...entry, id, timestamp };
+}
+
+export async function replaceProductDocuments(
+  env: D1Env,
+  productId: string,
+  documents: Array<Omit<ProductDocumentRow, 'id' | 'product_id' | 'last_synced_at'> & { id?: string }>
+) {
+  const timestamp = new Date().toISOString();
+  await env.DB.prepare(`DELETE FROM product_documents WHERE product_id = ?1`).bind(productId).run();
+
+  for (const doc of documents) {
+    const id = doc.id ?? crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO product_documents (id, product_id, title, url, content, embedding, last_synced_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+    )
+      .bind(id, productId, doc.title, doc.url, doc.content, JSON.stringify(doc.embedding), timestamp)
+      .run();
+  }
+
+  return timestamp;
+}
+
+export async function searchProductDocuments(
+  env: D1Env,
+  query: string,
+  limit = 5,
+  productId?: string
+): Promise<ProductDocumentRow[]> {
+  const searchTerm = `%${query}%`;
+  const statement = env.DB.prepare(
+    `SELECT id, product_id, title, url, content, embedding, last_synced_at
+     FROM product_documents
+     WHERE (title LIKE ?1 OR content LIKE ?1)
+     ${productId ? 'AND product_id = ?3' : ''}
+     ORDER BY last_synced_at DESC
+     LIMIT ?2`
+  );
+
+  const boundStatement = productId
+    ? statement.bind(searchTerm, limit, productId)
+    : statement.bind(searchTerm, limit);
+
+  const { results } = await boundStatement.all<{
+    id: string;
+    product_id: string;
+    title: string;
+    url: string;
+    content: string;
+    embedding: string | null;
+    last_synced_at: string;
+  }>();
+
+  return (results ?? []).map((row) => ({
+    id: row.id,
+    product_id: row.product_id,
+    title: row.title,
+    url: row.url,
+    content: row.content,
+    embedding: parseEmbedding(row.embedding),
+    last_synced_at: row.last_synced_at,
+  }));
 }
 
 export async function generateEmbedding(
