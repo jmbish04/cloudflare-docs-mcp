@@ -90,7 +90,7 @@ export class ProductSyncActor extends Actor<ProductSyncActorEnv> {
     } catch (error) {
       this.syncStatus = 'failed';
       const message = error instanceof Error ? error.message : 'Unknown sync failure.';
-      console.error('product_sync.failed', { product, message, error });
+      console.error('product_sync.failed', { product, message });
       return { ...this.getStatusSnapshot(), message };
     }
   }
