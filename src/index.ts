@@ -1,114 +1,115 @@
+/**
+ * Worker entrypoint exposing the public HTTP API used by external clients.
+ *
+ * The router is intentionally small: it merely resolves the relevant actors and
+ * forwards RPC envelopes. All domain-specific logic lives within the actors
+ * themselves to keep the request path as thin as possible.
+ */
+
 import { Hono } from 'hono';
-import type { Context } from 'hono';
-import { OpenAPIHono } from '@hono/zod-openapi';
-import { HTTPException } from 'hono/http-exception';
-import { ZodError } from 'zod';
-import { configureOpenAPIRoute } from './openapi';
-import { MCPAdapter, MCPAdapterEnv } from './mcpAdapter';
-import { ConsultationAgent, AgentEnv } from './agent';
-import {
-  codeConsultationRoute,
-  CodeConsultationRequestSchema,
-  ErrorSchema,
-  MCPToolCallRequestSchema,
-  MCPToolCallResponseSchema,
-  MCPToolListResponseSchema,
-  searchDocsRoute,
-  SearchDocsRequestSchema,
-} from './schemas';
 
-export type Bindings = AgentEnv & MCPAdapterEnv;
+import type { DurableObjectNamespaceLike, DurableObjectStubLike, WorkerEnv } from './env';
+import type { DocsSearchResult } from './data/d1';
 
-const app = new OpenAPIHono<{ Bindings: Bindings }>();
-const router = new Hono<{ Bindings: Bindings }>();
-const adapter = new MCPAdapter();
+export type Bindings = WorkerEnv;
 
-configureOpenAPIRoute(app);
+export function createApp() {
+  const app = new Hono<{ Bindings: Bindings }>();
 
-app.openapi(searchDocsRoute, async (c) => {
-  try {
-    const payload = SearchDocsRequestSchema.parse(await c.req.json<unknown>());
-    const result = await adapter.proxySearchDocs(c.env, payload);
-    return c.json(result);
-  } catch (error) {
-    return sendError(c, error);
-  }
-});
+  app.post('/api/sync/:product', async (c) => {
+    const product = c.req.param('product')?.trim();
+    if (!product) {
+      return c.json({ error: 'Product identifier is required.' }, 400);
+    }
 
-app.openapi(codeConsultationRoute, async (c) => {
-  try {
-    const payload = CodeConsultationRequestSchema.parse(await c.req.json<unknown>());
-    const agent = new ConsultationAgent(c.env);
-    const response = await agent.runCodeConsultation(payload, (input) =>
-      adapter.proxySearchDocs(c.env, input)
+    const response = await invokeActor<SyncActorResponse>(
+      c.env.PRODUCT_SYNC_ACTOR,
+      product,
+      'syncProduct',
+      { productKey: product }
     );
+
     return c.json(response);
-  } catch (error) {
-    return sendError(c, error);
-  }
-});
+  });
 
-router.get('/tools/list', (c) => {
-  const tools = adapter.listTools();
-  const parsed = MCPToolListResponseSchema.safeParse(tools);
-  if (!parsed.success) {
-    throw new HTTPException(500, { message: 'Tool registry is misconfigured.' });
-  }
-  return c.json(parsed.data);
-});
+  app.post('/api/chat/:sessionId', async (c) => {
+    const sessionId = c.req.param('sessionId')?.trim() || 'default';
+    const body = (await c.req.json<{ query?: string }>().catch(() => ({}))) as {
+      query?: string;
+    };
 
-router.post('/tools/call', async (c) => {
-  const body = await c.req.json().catch(() => undefined);
-  const parsed = MCPToolCallRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return c.json(ErrorSchema.parse({ error: 'Invalid tool invocation payload.' }), 400);
-  }
-
-  const { name, arguments: args } = parsed.data;
-  try {
-    if (name === 'search_docs') {
-      const payload = SearchDocsRequestSchema.parse(args);
-      const response = await adapter.proxySearchDocs(c.env, payload);
-      return c.json(MCPToolCallResponseSchema.parse({ name, response }));
+    const query = typeof body.query === 'string' ? body.query.trim() : '';
+    if (!query) {
+      return c.json({ error: 'Query is required.' }, 400);
     }
 
-    if (name === 'code_consultation') {
-      const payload = CodeConsultationRequestSchema.parse(args);
-      const agent = new ConsultationAgent(c.env);
-      const response = await agent.runCodeConsultation(payload, (input) =>
-        adapter.proxySearchDocs(c.env, input)
-      );
-      return c.json(MCPToolCallResponseSchema.parse({ name, response }));
-    }
+    const response = await invokeActor<ChatActorResponse>(
+      c.env.CHAT_SESSION_ACTOR,
+      sessionId,
+      'handleUserQuery',
+      { sessionId, query }
+    );
 
-    throw new HTTPException(404, { message: `Tool ${name} not found.` });
-  } catch (error) {
-    return sendError(c, error);
-  }
-});
+    return c.json(response);
+  });
 
-app.route('/', router);
+  app.get('/healthz', (c) => c.json({ status: 'ok' }));
 
-app.notFound((c) => c.json(ErrorSchema.parse({ error: 'Not Found' }), 404));
+  app.notFound((c) => c.json({ error: 'Not Found' }, 404));
 
-app.onError((error, c) => {
-  if (error instanceof HTTPException) {
-    return c.json(ErrorSchema.parse({ error: error.message }), error.status);
-  }
-  console.error('Unhandled error', error);
-  return c.json(ErrorSchema.parse({ error: 'Internal Server Error' }), 500);
-});
+  app.onError((error, c) => {
+    console.error('Unhandled worker error', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  });
 
-function sendError(c: Context<{ Bindings: Bindings }>, error: unknown) {
-  if (error instanceof HTTPException) {
-    throw error;
-  }
-  if (error instanceof ZodError) {
-    return c.json(ErrorSchema.parse({ error: 'Invalid request payload', details: error.flatten() }), 400);
-  }
-
-  const message = error instanceof Error ? error.message : 'Unexpected error.';
-  return c.json(ErrorSchema.parse({ error: message }), 500);
+  return app;
 }
 
+const app = createApp();
 export default app;
+
+type SyncActorResponse = {
+  lastSyncTimestamp: number;
+  syncStatus: 'idle' | 'in_progress' | 'success' | 'failed';
+  message?: string;
+};
+
+type ChatActorResponse = {
+  reply: string;
+  citations: DocsSearchResult[];
+  historyLength: number;
+};
+
+async function invokeActor<T>(
+  namespace: DurableObjectNamespaceLike,
+  name: string,
+  method: string,
+  params: Record<string, unknown>
+): Promise<T> {
+  const stub = namespace.getByName(name);
+  await ensureActorName(stub, name);
+
+  const response = await stub.fetch('https://actor.local/rpc', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method, params }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => 'Actor invocation failed.');
+    throw new Error(`Actor ${name} responded with ${response.status}: ${message}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function ensureActorName(stub: DurableObjectStubLike, name: string) {
+  const maybe = (stub as unknown as { setName?: (id: string) => Promise<void> }).setName;
+  if (typeof maybe === 'function') {
+    try {
+      await maybe.call(stub, name);
+    } catch (error) {
+      console.warn('Failed to set actor name via Actors SDK helper.', error);
+    }
+  }
+}
