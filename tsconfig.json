@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "outDir": "dist"
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "worker-configuration.d.ts"]
 }

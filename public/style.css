@@ -1,0 +1,7 @@
+body { font-family: sans-serif; background-color: #f4f4f4; color: #333; }
+#dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px; }
+.card { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+pre { background: #eee; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; }
+#ws-log { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; background: #fff; }
+button { padding: 10px 15px; border: none; background-color: #007bff; color: white; border-radius: 4px; cursor: pointer; }
+button:hover { background-color: #0056b3; }

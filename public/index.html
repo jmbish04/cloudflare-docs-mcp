@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat - AI Research Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.css" rel="stylesheet" />
+</head>
+<body class="bg-gray-100 dark:bg-gray-900">
+
+    <!-- Navbar will be injected by nav.js -->
+
+    <main class="p-4 md:ml-64">
+        <div class="mt-14">
+            <div class="mb-4 border-b border-gray-200 dark:border-gray-700">
+                <ul class="flex flex-wrap -mb-px text-sm font-medium text-center" id="agentTabs" data-tabs-toggle="#agentTabsContent" role="tablist">
+                    <li class="me-2" role="presentation">
+                        <button class="inline-block p-4 border-b-2 rounded-t-lg" id="unblock-tab" data-tabs-target="#unblock" type="button" role="tab" aria-controls="unblock" aria-selected="false">1. Get Unstuck</button>
+                    </li>
+                    <li class="me-2" role="presentation">
+                        <button class="inline-block p-4 border-b-2 rounded-t-lg hover:text-gray-600 hover:border-gray-300 dark:hover:text-gray-300" id="research-tab" data-tabs-target="#research" type="button" role="tab" aria-controls="research" aria-selected="false">2. Proactive Research</button>
+                    </li>
+                    <li class="me-2" role="presentation">
+                        <button class="inline-block p-4 border-b-2 rounded-t-lg hover:text-gray-600 hover:border-gray-300 dark:hover:text-gray-300" id="curate-tab" data-tabs-target="#curate" type="button" role="tab" aria-controls="curate" aria-selected="false">3. Curate Knowledge</button>
+                    </li>
+                </ul>
+            </div>
+                    <div id="auth-container-unblock" class="mb-4 p-2 border rounded-lg dark:border-gray-600">
+                        <label for="api-key-unblock" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Authentication Required</label>
+                        <div class="flex">
+                            <input type="password" id="api-key-unblock" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-l-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Enter API Key">
+                            <button id="save-key-unblock" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg">Save</button>
+                        </div>
+                    </div>
+                    <div id="chat-container-unblock" class="flex flex-col h-[60vh]">
+                        <div id="chat-messages-unblock" class="flex-1 overflow-y-auto p-4 border rounded-lg dark:border-gray-600"></div>
+                        <form id="chat-form-unblock" class="mt-4 flex">
+                            <input type="text" id="chat-input-unblock" class="w-full p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-500" placeholder="Authenticate to begin..." disabled>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg disabled:bg-gray-500" disabled>Send</button>
+                        </form>
+                    </div>
+                </div>
+                <!-- Proactive Research Tab -->
+                <div class="hidden p-4 rounded-lg bg-gray-50 dark:bg-gray-800" id="research" role="tabpanel" aria-labelledby="research-tab">
+                    <h2 class="text-xl font-bold mb-2 text-gray-900 dark:text-white">Feasibility Agent</h2>
+                    <p class="mb-4 text-gray-600 dark:text-gray-400">Submit a long-running research job to investigate feasibility, find GitHub examples, and analyze repositories.</p>
+                    <div id="auth-container-research" class="mb-4 p-2 border rounded-lg dark:border-gray-600">
+                         <label for="api-key-research" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Authentication Required</label>
+                        <div class="flex">
+                            <input type="password" id="api-key-research" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-l-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Enter API Key">
+                            <button id="save-key-research" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg">Save</button>
+                        </div>
+                    </div>
+                    <form id="research-form">
+                        <textarea id="research-prompt" rows="4" class="block p-2.5 w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 disabled:bg-gray-500" placeholder="Authenticate to begin..." disabled></textarea>
+                        <button type="submit" class="mt-4 text-white bg-blue-700 hover:bg-blue-800 font-medium rounded-lg text-sm px-5 py-2.5 disabled:bg-gray-500" disabled>Submit Research Job</button>
+                    </form>
+                    <div id="research-status" class="mt-4"></div>
+                </div>
+                <!-- Curate Knowledge Tab -->
+                <div class="hidden p-4 rounded-lg bg-gray-50 dark:bg-gray-800" id="curate" role="tabpanel" aria-labelledby="curate-tab">
+                    <h2 class="text-xl font-bold mb-2 text-gray-900 dark:text-white">Knowledge Curation</h2>
+                    <p class="mb-4 text-gray-600 dark:text-gray-400">Interact with the agent to add, update, or correct the curated D1 knowledge base.</p>
+                    <div id="auth-container-curate" class="mb-4 p-2 border rounded-lg dark:border-gray-600">
+                        <label for="api-key-curate" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white">Authentication Required</label>
+                        <div class="flex">
+                            <input type="password" id="api-key-curate" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-l-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white" placeholder="Enter API Key">
+                            <button id="save-key-curate" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg">Save</button>
+                        </div>
+                    </div>
+                    <div id="chat-container-curate" class="flex flex-col h-[60vh]">
+                        <div id="chat-messages-curate" class="flex-1 overflow-y-auto p-4 border rounded-lg dark:border-gray-600"></div>
+                        <form id="chat-form-curate" class="mt-4 flex">
+                            <input type="text" id="chat-input-curate" class="w-full p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white disabled:bg-gray-500" placeholder="Authenticate to begin..." disabled>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg disabled:bg-gray-500" disabled>Send</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/assets/js/nav.js"></script>
+    <script src="/assets/js/client.js"></script>
+    <script src="/assets/js/chat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+</body>
+</html>

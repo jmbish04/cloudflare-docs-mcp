@@ -22,6 +22,11 @@ export class CodeIngestionActor extends Actor<CodeIngestionActorEnv> {
    * @returns {Promise<Response>} A response acknowledging the ingestion request.
    */
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === '/test') {
+      return this.test();
+    }
+
     if (request.method !== 'POST') {
       return new Response('Method Not Allowed', { status: 405 });
     }
@@ -52,6 +57,24 @@ export class CodeIngestionActor extends Actor<CodeIngestionActorEnv> {
     } catch (error) {
       console.error('Error in CodeIngestionActor:', error);
       return Response.json({ error: 'Failed to process ingestion request.' }, { status: 500 });
+    }
+  }
+
+  /**
+   * @method test
+   * @description A dedicated method for running a health check on the actor's dependencies (D1, KV).
+   */
+  async test(): Promise<Response> {
+    try {
+      await this.env.DB.prepare('SELECT 1').run();
+      const testKey = `health_check_ingestion`;
+      await (this.env as any).AGENT_CACHE.put(testKey, 'ok');
+      const value = await (this.env as any).AGENT_CACHE.get(testKey);
+      await (this.env as any).AGENT_CACHE.delete(testKey);
+      if (value !== 'ok') throw new Error('KV read/write check failed.');
+      return Response.json({ status: 'PASS' });
+    } catch (e) {
+      return Response.json({ status: 'FAIL', error: e.message }, { status: 500 });
     }
   }
 }

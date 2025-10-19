@@ -1,5 +1,3 @@
-/// <reference types="@cloudflare/workers-types" />
-
 /**
  * @file src/env.ts
  * @description Shared environment contracts used across the worker and actors.
@@ -31,7 +29,7 @@ export interface QueueLike<T = any> {
  * @description The core environment bindings and variables available to all parts of the application.
  */
 export interface CoreEnv {
-  AI: CfProperties['AI'];
+  AI: Ai;
   DB: D1Database;
   VECTORIZE_INDEX: VectorizeIndex;
 

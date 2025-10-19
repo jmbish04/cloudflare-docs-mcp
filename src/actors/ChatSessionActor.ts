@@ -1,50 +1,54 @@
 /**
  * @file src/actors/ChatSessionActor.ts
- * @description This file defines the ChatSessionActor, a Durable Object responsible for managing
- * the state and logic of a single conversation. It orchestrates the research process by
- * delegating to a specialized research agent.
+ * @description The "General Research Agent" actor. It uses a suite of tools to answer user queries.
  */
 
 import { Actor, Persist } from '@cloudflare/actors';
+import { z } from 'zod';
 import type { ChatSessionActorEnv } from '../env';
+import { logTransaction } from '../data/d1';
+import { StructuredResponseTool, EmbeddingTool } from '../ai-tools';
+import { GitHubService } from '../tools/github';
+import { BrowserRender } from '../tools/browser';
+import { SandboxTool } from '../tools/sandbox';
 
-// Define the structure for a message in the conversation history
-interface AgentMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
+const ToolCallSchema = z.object({
+  tool: z.string().describe("The name of the tool to call."),
+  args: z.any().describe("The arguments to pass to the tool."),
+});
 
-/**
- * @class ChatSessionActor
- * @description A stateful actor that manages a single chat session. It persists the message
- * history and orchestrates the agent's research and response generation process.
- * It is built using the Cloudflare Agents SDK, which is based on Durable Objects.
- */
+const ResearchPlanSchema = z.object({
+  plan: z.array(z.string()).describe("A step-by-step plan for how to answer the user's query."),
+  tool_calls: z.array(ToolCallSchema).describe("The sequence of tool calls required to execute the plan."),
+});
+
+interface AgentMessage { role: 'user' | 'assistant'; content: string; }
+
 export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
-  // Persist the message history across actor invocations.
-  // @ts-expect-error Decorators from @cloudflare/actors use TC39 semantics not yet modelled by tsc
-  @Persist
-  private messageHistory: AgentMessage[] = [];
+  // @ts-expect-error Decorators use TC39 semantics
+  @Persist private messageHistory: AgentMessage[] = [];
+  
+  // Tooling Suite
+  private structuredResponseTool: StructuredResponseTool;
+  private embeddingTool: EmbeddingTool;
+  private github: GitHubService;
+  private browser: BrowserRender;
+  private sandbox: SandboxTool;
 
-  /**
-   * @method fetch
-   * @description This is the entry point for all requests to this actor instance. It handles
-   * the incoming chat query and returns the agent's response. This aligns with the
-   * unified routing model where the main worker forwards the request here.
-   * @param {Request} request - The incoming HTTP request from the main worker.
-   * @returns {Promise<Response>} A promise that resolves to the HTTP response.
-   */
+  constructor(state: DurableObjectState, env: ChatSessionActorEnv) {
+    super(state, env);
+    this.structuredResponseTool = new StructuredResponseTool(env as any);
+    this.embeddingTool = new EmbeddingTool(env as any);
+    this.github = new GitHubService(env as any);
+    this.browser = new BrowserRender(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_API_TOKEN);
+    this.sandbox = new SandboxTool(env.SANDBOX, `session-${this.state.id}`);
+  }
+
   async fetch(request: Request): Promise<Response> {
-    if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 });
-    }
-
+    if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
     try {
       const { query, sessionId } = (await request.json()) as { query: string; sessionId: string };
-      if (!query) {
-        return Response.json({ error: 'Query is required.' }, { status: 400 });
-      }
-
+      if (!query) return Response.json({ error: 'Query is required.' }, { status: 400 });
       const result = await this.handleUserQuery(sessionId, query);
       return Response.json(result);
     } catch (error) {
@@ -53,35 +57,59 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
     }
   }
 
-  /**
-   * @method handleUserQuery
-   * @description Orchestrates the process of generating a response to a user's query.
-   * This method will be expanded to perform multi-source research.
-   * @param {string} sessionId - The ID of the current session.
-   * @param {string} query - The user's query.
-   * @returns {Promise<object>} A promise that resolves to the agent's response package.
-   */
   async handleUserQuery(sessionId: string, query: string): Promise<object> {
-    // Add user message to history
+    await logTransaction(this.env, sessionId, 'USER_QUERY', { query });
     this.messageHistory.push({ role: 'user', content: query });
 
-    // --- Placeholder for the new multi-source research agent ---
-    // In the next steps, this is where we will:
-    // 1. Create a new research agent.
-    // 2. The agent will query the live Cloudflare Docs SSE.
-    // 3. The agent will query the curated D1 database.
-    // 4. The agent will synthesize the results.
-    // 5. The agent will potentially use a sandbox for verification.
+    // Step 1: Create a research plan using the structured response tool.
+    const planPrompt = `Create a research plan to answer the query: "${query}".`;
+    const planResult = await this.structuredResponseTool.analyzeText(ResearchPlanSchema, planPrompt);
 
-    const assistantResponse = `This is a placeholder response for the query: "${query}". The multi-source research agent has not been implemented yet.`;
-    // --- End of Placeholder ---
+    if (!planResult.success || !planResult.structuredResult) {
+      const error = "I'm sorry, I was unable to create a research plan.";
+      await logTransaction(this.env, sessionId, 'ERROR_CREATE_PLAN', { error: planResult.error });
+      return { sessionId, response: error, error: planResult.error };
+    }
+    const plan = planResult.structuredResult;
+    await logTransaction(this.env, sessionId, 'CREATE_PLAN', { plan });
 
-    // Add assistant response to history
-    this.messageHistory.push({ role: 'assistant', content: assistantResponse });
+    // Step 2: Execute the tool calls in the plan.
+    const toolResults = [];
+    for (const call of plan.tool_calls) {
+      const result = await this.executeTool(call.tool, call.args);
+      toolResults.push({ tool: call.tool, result });
+      await logTransaction(this.env, sessionId, `TOOL_RUN_${call.tool.toUpperCase()}`, { result });
+    }
+    
+    // Step 3: Synthesize the final response.
+    const synthesisPrompt = `Query: "${query}"
 
-    return {
-      sessionId,
-      response: assistantResponse,
-    };
+Tool Results:
+${JSON.stringify(toolResults, null, 2)}
+
+Synthesize a final answer.`;
+    const finalResponse = await this.runSynthesis(synthesisPrompt);
+    
+    // ... final logging and response formatting ...
+    await logTransaction(this.env, sessionId, 'FINAL_RESPONSE', { response: finalResponse });
+    this.messageHistory.push({ role: 'assistant', content: finalResponse });
+
+    return { sessionId, response: finalResponse };
+  }
+
+  private async executeTool(toolName: string, args: any): Promise<any> {
+    switch (toolName) {
+      case 'github_api': return this.github.getRepoContents(args.owner, args.repo, args.path);
+      case 'browser': return this.browser.scrape({ url: args.url, elements: args.elements });
+      case 'sandbox': return this.sandbox.exec(args.command);
+      // ... other tool cases
+      default: return { error: `Tool ${toolName} not found.` };
+    }
+  }
+
+  private async runSynthesis(prompt: string): Promise<string> {
+    const model = this.env.DEFAULT_MODEL_REASONING as keyof AiModels;
+    const response = await this.env.AI.run(model, { prompt });
+    return (response as { response?: string }).response || 'Failed to generate a response.';
   }
 }
