@@ -1,108 +1,106 @@
+/**
+ * @file src/index.ts
+ * @description This is the main entry point for the Cloudflare AI Research Assistant Worker.
+ * It sets up the Hono router, defines the API routes, and implements the OpenAPI schema generation.
+ * This file adheres to the Unified Routing principle outlined in AGENTS.md.
+ */
 
-import { Hono } from 'hono';
-import type { DurableObjectNamespaceLike, DurableObjectStubLike, WorkerEnv } from './env';
-import type { DocsSearchResult } from './data/d1';
+import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import type { WorkerEnv } from './env';
+import { ChatSessionActor } from './actors/ChatSessionActor';
 
+// Define the bindings from the environment
 export type Bindings = WorkerEnv;
 
-export function createApp() {
-  const app = new Hono<{ Bindings: Bindings }>();
+const app = new OpenAPIHono<{ Bindings: Bindings }>();
 
-  app.post('/api/sync/:product', async (c) => {
-    const product = c.req.param('product')?.trim();
-    if (!product) {
-      return c.json({ error: 'Product identifier is required.' }, 400);
-    }
+// --- OpenAPI Schema Definition ---
 
-    const response = await invokeActor<SyncActorResponse>(
-      c.env.PRODUCT_SYNC_ACTOR,
-      product,
-      'syncProduct',
-      { productKey: product }
-    );
+const ChatRequestSchema = z.object({
+  sessionId: z.string().optional().openapi({
+    description: 'An optional session ID to maintain conversation context.',
+    example: 'session-12345',
+  }),
+  query: z.string().openapi({
+    description: 'The question or prompt for the AI research assistant.',
+    example: 'How do I set up a Next.js project on Cloudflare Pages?',
+  }),
+});
 
-    return c.json(response);
-  });
+const ChatResponseSchema = z.object({
+  sessionId: z.string().openapi({
+    description: 'The session ID for the conversation.',
+    example: 'session-12345',
+  }),
+  response: z.string().openapi({
+    description: 'The AI assistant\'s response.',
+    example: 'To set up a Next.js project on Cloudflare Pages, you need to...',
+  }),
+  // This will be expanded later to include citations, verified code, etc.
+});
 
-  app.post('/api/chat/:sessionId', async (c) => {
-    const sessionId = c.req.param('sessionId')?.trim() || 'default';
-    const body = (await c.req.json<{ query?: string }>().catch(() => ({}))) as {
-      query?: string;
-    };
+const route = createRoute({
+  method: 'post',
+  path: '/api/chat',
+  request: {
+    body: {
+      content: {
+        'application/json': {
+          schema: ChatRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        'application/json': {
+          schema: ChatResponseSchema,
+        },
+      },
+      description: 'The response from the AI research assistant.',
+    },
+  },
+});
 
-    const query = typeof body.query === 'string' ? body.query.trim() : '';
-    if (!query) {
-      return c.json({ error: 'Query is required.' }, 400);
-    }
+// --- API Route Implementation ---
 
-    const response = await invokeActor<ChatActorResponse>(
-      c.env.CHAT_SESSION_ACTOR,
-      sessionId,
-      'handleUserQuery',
-      { sessionId, query }
-    );
+app.openapi(route, async (c) => {
+  const { sessionId: requestedSessionId, query } = c.req.valid('json');
+  const sessionId = requestedSessionId || crypto.randomUUID();
 
-    return c.json(response);
-  });
+  // Here is the unified routing point.
+  // We will get the actor and pass the request to a core handler.
+  const actorId = c.env.CHAT_SESSION_ACTOR.idFromName(sessionId);
+  const actor = c.env.CHAT_SESSION_ACTOR.get(actorId);
 
-  app.get('/healthz', (c) => c.json({ status: 'ok' }));
+  // For now, we\'ll just send a simple request. This will be expanded.
+  const response = await actor.fetch(c.req.raw);
+  const result = (await response.json()) as z.infer<typeof ChatResponseSchema>;
 
-  app.notFound((c) => c.json({ error: 'Not Found' }, 404));
+  return c.json(result);
+});
 
-  app.onError((error, c) => {
-    console.error('Unhandled worker error', error);
-    return c.json({ error: 'Internal Server Error' }, 500);
-  });
 
-  return app;
-}
+// --- OpenAPI Documentation Route ---
 
-const app = createApp();
+app.doc('/openapi.json', {
+  openapi: '3.1.0',
+  info: {
+    title: 'Cloudflare AI Research Assistant API',
+    version: 'v1.0.0',
+    description: 'An API for interacting with an AI agent specialized in Cloudflare development.',
+  },
+});
+
+// --- Health & Error Handling ---
+
+app.get('/healthz', (c) => c.json({ status: 'ok' }));
+app.notFound((c) => c.json({ error: 'Not Found' }, 404));
+app.onError((error, c) => {
+  console.error('Unhandled worker error', error);
+  return c.json({ error: 'Internal Server Error' }, 500);
+});
+
 export default app;
-
-type SyncActorResponse = {
-  lastSyncTimestamp: number;
-  syncStatus: 'idle' | 'in_progress' | 'success' | 'failed';
-  message?: string;
-};
-
-type ChatActorResponse = {
-  reply: string;
-  citations: DocsSearchResult[];
-  historyLength: number;
-};
-
-async function invokeActor<T>(
-  namespace: DurableObjectNamespaceLike,
-  name: string,
-  method: string,
-  params: Record<string, unknown>
-): Promise<T> {
-  const stub = namespace.getByName(name);
-  await ensureActorName(stub, name);
-
-  const response = await stub.fetch('https://actor.local/rpc', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ method, params }),
-  });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => 'Actor invocation failed.');
-    throw new Error(`Actor ${name} responded with ${response.status}: ${message}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-async function ensureActorName(stub: DurableObjectStubLike, name: string) {
-  const maybe = (stub as unknown as { setName?: (id: string) => Promise<void> }).setName;
-  if (typeof maybe === 'function') {
-    try {
-      await maybe.call(stub, name);
-    } catch (error) {
-      console.warn('Failed to set actor name via Actors SDK helper.', error);
-    }
-  }
-}
-
+export { ChatSessionActor };

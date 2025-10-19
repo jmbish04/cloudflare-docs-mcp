@@ -2,36 +2,39 @@ name = "cloudflare-docs-mcp"
 main = "src/index.ts"
 compatibility_date = "2024-06-20"
 
-[durable_objects]
-bindings = [
-  { name = "PRODUCT_SYNC_ACTOR", class_name = "ProductSyncActor" },
-  { name = "CHAT_SESSION_ACTOR", class_name = "ChatSessionActor" },
-]
+# Define the bindings for our Durable Objects.
+# Each binding maps a name (used in the code) to a class name.
+[[durable_objects.bindings]]
+name = "CHAT_SESSION_ACTOR"
+class_name = "ChatSessionActor"
 
+[[durable_objects.bindings]]
+name = "CODE_INGESTION_ACTOR"
+class_name = "CodeIngestionActor"
+
+# Define the binding for our D1 database.
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudflare-docs-best-practices"
 database_id = "233820bc-7d62-46e1-b215-311479ae372f"
 migrations_dir = "migrations"
 
-[[migrations]]
-tag = "v2_actors_refactor"
-new_classes = ["ProductSyncActor", "ChatSessionActor"]
+# Define the binding for our producer queue.
+[[queues.producers]]
+queue = "code-ingestion-queue"
+binding = "CODE_INGESTION_QUEUE"
 
+# Define environment variables for the worker.
 [vars]
-AI_MODEL = "@cf/openai/gpt-oss-120b"
+DEFAULT_MODEL_REASONING = "@cf/meta/llama-3-8b-instruct"
+DEFAULT_MODEL_STRUCTURED_RESPONSE = "@cf/meta/llama-3-8b-instruct"
+DEFAULT_MODEL_EMBEDDING = "@cf/baai/bge-large-en-v1.5"
 
+# Enable observability features.
 [observability]
 enabled = true
 
-[[durable_objects.bindings]]
-name = "PRODUCT_SYNC_ACTOR"
-class_name = "ProductSyncActor"
-
-[[durable_objects.bindings]]
-name = "CHAT_SESSION_ACTOR"
-class_name = "ChatSessionActor"
-
+# Define migrations for our Durable Objects to handle state.
 [[migrations]]
-tag = "v2"
-new_classes = ["ProductSyncActor", "ChatSessionActor"]
+tag = "v1"
+new_classes = [ "ChatSessionActor", "CodeIngestionActor" ]

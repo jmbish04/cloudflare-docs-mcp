@@ -1,83 +1,87 @@
 /**
- * ChatSessionActor persists conversational state for a single session ID.
- *
- * It orchestrates each turn by delegating to the DocsAgent helper which in
- * turn coordinates retrieval against the D1 corpus and optional LLM calls.
+ * @file src/actors/ChatSessionActor.ts
+ * @description This file defines the ChatSessionActor, a Durable Object responsible for managing
+ * the state and logic of a single conversation. It orchestrates the research process by
+ * delegating to a specialized research agent.
  */
 
 import { Actor, Persist } from '@cloudflare/actors';
-
-import { createDocsAgent, type AgentMessage } from '../agents/docsAgent';
 import type { ChatSessionActorEnv } from '../env';
 
-const MAX_HISTORY_LENGTH = 50;
+// Define the structure for a message in the conversation history
+interface AgentMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
-type RpcEnvelope = {
-  method: 'handleUserQuery' | 'getHistory';
-  params?: Record<string, unknown>;
-};
-
+/**
+ * @class ChatSessionActor
+ * @description A stateful actor that manages a single chat session. It persists the message
+ * history and orchestrates the agent's research and response generation process.
+ * It is built using the Cloudflare Agents SDK, which is based on Durable Objects.
+ */
 export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
+  // Persist the message history across actor invocations.
   // @ts-expect-error Decorators from @cloudflare/actors use TC39 semantics not yet modelled by tsc
   @Persist
   private messageHistory: AgentMessage[] = [];
 
+  /**
+   * @method fetch
+   * @description This is the entry point for all requests to this actor instance. It handles
+   * the incoming chat query and returns the agent's response. This aligns with the
+   * unified routing model where the main worker forwards the request here.
+   * @param {Request} request - The incoming HTTP request from the main worker.
+   * @returns {Promise<Response>} A promise that resolves to the HTTP response.
+   */
   async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (request.method === 'POST' && url.pathname === '/rpc') {
-      const payload = (await request.json().catch(() => null)) as RpcEnvelope | null;
-      if (!payload || typeof payload.method !== 'string') {
-        return Response.json({ error: 'Invalid RPC payload.' }, { status: 400 });
-      }
-
-      if (payload.method === 'handleUserQuery') {
-        const sessionId = typeof payload.params?.sessionId === 'string' ? payload.params.sessionId : this.name;
-        const query = typeof payload.params?.query === 'string' ? payload.params.query : '';
-        if (!query.trim()) {
-          return Response.json({ error: 'Query must not be empty.' }, { status: 400 });
-        }
-        return Response.json(await this.handleUserQuery(sessionId ?? 'default', query));
-      }
-
-      if (payload.method === 'getHistory') {
-        return Response.json({ history: this.messageHistory });
-      }
-
-      return Response.json({ error: `Unknown RPC method ${payload.method}` }, { status: 400 });
+    if (request.method !== 'POST') {
+      return new Response('Method Not Allowed', { status: 405 });
     }
 
-    if (request.method === 'GET' && url.pathname === '/status') {
-      return Response.json({ historyLength: this.messageHistory.length });
-    }
+    try {
+      const { query, sessionId } = (await request.json()) as { query: string; sessionId: string };
+      if (!query) {
+        return Response.json({ error: 'Query is required.' }, { status: 400 });
+      }
 
-    return Response.json({ error: 'Not Found' }, { status: 404 });
+      const result = await this.handleUserQuery(sessionId, query);
+      return Response.json(result);
+    } catch (error) {
+      console.error('Error in ChatSessionActor:', error);
+      return Response.json({ error: 'Failed to process chat request.' }, { status: 500 });
+    }
   }
 
-  async handleUserQuery(sessionId: string, query: string) {
-    const question = query.trim();
-    const userMessage: AgentMessage = { role: 'user', content: question };
-    const updatedHistory = [...this.messageHistory, userMessage];
+  /**
+   * @method handleUserQuery
+   * @description Orchestrates the process of generating a response to a user's query.
+   * This method will be expanded to perform multi-source research.
+   * @param {string} sessionId - The ID of the current session.
+   * @param {string} query - The user's query.
+   * @returns {Promise<object>} A promise that resolves to the agent's response package.
+   */
+  async handleUserQuery(sessionId: string, query: string): Promise<object> {
+    // Add user message to history
+    this.messageHistory.push({ role: 'user', content: query });
 
-    const agent = createDocsAgent(this.env);
-    console.log(JSON.stringify({ event: 'chat.turn.start', sessionId, messageCount: updatedHistory.length }));
-    const response = await agent.runConversation(updatedHistory);
+    // --- Placeholder for the new multi-source research agent ---
+    // In the next steps, this is where we will:
+    // 1. Create a new research agent.
+    // 2. The agent will query the live Cloudflare Docs SSE.
+    // 3. The agent will query the curated D1 database.
+    // 4. The agent will synthesize the results.
+    // 5. The agent will potentially use a sandbox for verification.
 
-    const assistantMessage: AgentMessage = { role: 'assistant', content: response.answer };
-    this.messageHistory = [...updatedHistory, assistantMessage].slice(-MAX_HISTORY_LENGTH);
+    const assistantResponse = `This is a placeholder response for the query: "${query}". The multi-source research agent has not been implemented yet.`;
+    // --- End of Placeholder ---
 
-    console.log(
-      JSON.stringify({
-        event: 'chat.turn.finish',
-        sessionId,
-        citations: response.citations.map((item) => item.url),
-      })
-    );
+    // Add assistant response to history
+    this.messageHistory.push({ role: 'assistant', content: assistantResponse });
 
     return {
-      reply: response.answer,
-      citations: response.citations,
-      historyLength: this.messageHistory.length,
+      sessionId,
+      response: assistantResponse,
     };
   }
 }
