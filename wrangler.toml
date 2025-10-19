@@ -5,7 +5,8 @@ compatibility_date = "2024-06-20"
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudflare-docs-best-practices"
-database_id = "233820bc-7d62-46e1-b215-311479ae372f" # TODO: replace with actual database id
+database_id = "233820bc-7d62-46e1-b215-311479ae372f"
+migrations_dir = "migrations"
 
 [vars]
 AI_MODEL = "@cf/openai/gpt-oss-120b"
