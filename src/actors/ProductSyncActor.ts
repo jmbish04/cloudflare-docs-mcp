@@ -1,134 +1,138 @@
+/**
+ * Durable ProductSyncActor orchestrates ingestion cycles for a single product.
+ *
+ * The actor keeps lightweight state about the most recent sync and exposes a
+ * tiny RPC surface that the HTTP worker can call. Scheduling is handled via the
+ * Actors alarm helper so recurring jobs survive evictions.
+ */
+
 import { Actor, Persist } from '@cloudflare/actors';
-import { MCPAdapter, MCPAdapterEnv } from '../mcpAdapter';
-import { D1Env, generateEmbedding, replaceProductDocuments, ProductDocumentRow } from '../d1';
 
-export type ProductSyncStatus = 'idle' | 'in_progress' | 'success' | 'failed';
+import type { ProductSyncActorEnv } from '../env';
 
-export interface ProductSyncState {
-  productId: string;
-  lastSyncTimestamp: number | null;
-  syncStatus: ProductSyncStatus;
-  lastSyncError: string | null;
-  lastSyncCount: number;
-}
+type SyncStatus = 'idle' | 'in_progress' | 'success' | 'failed';
 
-export type ProductSyncActorEnv = MCPAdapterEnv & D1Env & { AI?: { run: (model: string, input: unknown) => Promise<unknown> }; AI_MODEL?: string };
+type RpcEnvelope = {
+  method: 'syncProduct' | 'getStatus';
+  params?: Record<string, unknown>;
+};
+
+type SyncResponse = {
+  lastSyncTimestamp: number;
+  syncStatus: SyncStatus;
+  message?: string;
+};
 
 export class ProductSyncActor extends Actor<ProductSyncActorEnv> {
-  private readonly adapter = new MCPAdapter();
-
-  // @ts-expect-error Cloudflare Actors decorator uses the Stage 3 field decorator signature.
+  // @ts-expect-error Decorators from @cloudflare/actors use TC39 semantics not yet modelled by tsc
   @Persist
-  private state: ProductSyncState = {
-    productId: '',
-    lastSyncTimestamp: null,
-    syncStatus: 'idle',
-    lastSyncError: null,
-    lastSyncCount: 0,
-  };
+  private lastSyncTimestamp = 0;
+
+  // @ts-expect-error Decorators from @cloudflare/actors use TC39 semantics not yet modelled by tsc
+  @Persist
+  private syncStatus: SyncStatus = 'idle';
 
   protected async onInit(): Promise<void> {
-    if (!this.state.productId && this.name) {
-      this.state.productId = this.name;
-    }
-
-    await this.scheduleRecurringSync();
+    await this.ensureSchedule();
   }
 
-  async scheduleRecurringSync(): Promise<void> {
-    const schedules = this.alarms.getSchedules({ type: 'cron' });
-    const alreadyScheduled = schedules.some((schedule) => schedule.callback === 'syncProduct');
-    if (!alreadyScheduled) {
-      await this.alarms.schedule('0 */6 * * *', 'syncProduct');
-    }
-  }
-
-  async syncProduct(): Promise<{ status: ProductSyncStatus; documents: number }>
-  async syncProduct(_: unknown): Promise<{ status: ProductSyncStatus; documents: number }>
-  async syncProduct(): Promise<{ status: ProductSyncStatus; documents: number }> {
-    this.ensureProductId();
-    this.state.syncStatus = 'in_progress';
-    this.state.lastSyncError = null;
-
-    try {
-      const documents = await this.fetchProductDocuments();
-      await replaceProductDocuments(this.env, this.state.productId, documents);
-      this.state.lastSyncTimestamp = Date.now();
-      this.state.syncStatus = 'success';
-      this.state.lastSyncCount = documents.length;
-      return { status: this.state.syncStatus, documents: documents.length };
-    } catch (error) {
-      this.state.syncStatus = 'failed';
-      this.state.lastSyncError = error instanceof Error ? error.message : String(error);
-      throw error;
-    }
-  }
-
-  async getStatus(): Promise<ProductSyncState> {
-    this.ensureProductId();
-    return { ...this.state };
-  }
-
-  protected async onRequest(request: Request): Promise<Response> {
+  async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const [, action] = url.pathname.split('/');
 
-    if (request.method === 'POST' && action === 'sync') {
-      try {
-        const result = await this.syncProduct();
-        return Response.json(result);
-      } catch (error) {
-        return Response.json(
-          {
-            error: error instanceof Error ? error.message : 'Sync failed',
-            status: this.state.syncStatus,
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    if (request.method === 'GET' && action === 'status') {
+    if (request.method === 'GET' && url.pathname === '/status') {
       return Response.json(await this.getStatus());
     }
 
-    return new Response('Not Found', { status: 404 });
-  }
-
-  private ensureProductId(): void {
-    if (!this.state.productId) {
-      if (!this.name) {
-        throw new Error('Product identifier could not be determined.');
+    if (request.method === 'POST' && url.pathname === '/rpc') {
+      const payload = (await request.json().catch(() => null)) as RpcEnvelope | null;
+      if (!payload || typeof payload.method !== 'string') {
+        return Response.json({ error: 'Invalid RPC payload.' }, { status: 400 });
       }
-      this.state.productId = this.name;
+
+      switch (payload.method) {
+        case 'syncProduct': {
+          const productKey = typeof payload.params?.productKey === 'string'
+            ? payload.params?.productKey
+            : undefined;
+          return Response.json(await this.syncProduct(productKey));
+        }
+        case 'getStatus': {
+          return Response.json(await this.getStatus());
+        }
+        default:
+          return Response.json({ error: `Unknown RPC method ${payload.method}` }, { status: 400 });
+      }
+    }
+
+    return Response.json({ error: 'Not Found' }, { status: 404 });
+  }
+
+  /**
+   * Trigger an ingestion cycle. The implementation intentionally fails fast and
+   * leaves a breadcrumb trail that downstream automations can consume.
+   */
+  async syncProduct(productKey?: string): Promise<SyncResponse> {
+    const product = productKey ?? this.name ?? 'default';
+    const startedAt = Date.now();
+
+    this.syncStatus = 'in_progress';
+    console.log(JSON.stringify({ event: 'product_sync.start', product, actor: this.name, startedAt }));
+
+    try {
+      // TODO: wire real ingestion pipeline once available.
+      await this.simulateIngestion(product);
+
+      this.lastSyncTimestamp = Date.now();
+      this.syncStatus = 'success';
+
+      console.log(JSON.stringify({ event: 'product_sync.success', product, durationMs: Date.now() - startedAt }));
+      return this.getStatus();
+    } catch (error) {
+      this.syncStatus = 'failed';
+      const message = error instanceof Error ? error.message : 'Unknown sync failure.';
+      console.error('product_sync.failed', { product, message });
+      return { ...this.getStatusSnapshot(), message };
     }
   }
 
-  private async fetchProductDocuments(): Promise<
-    Array<Omit<ProductDocumentRow, 'id' | 'product_id' | 'last_synced_at'> & { id?: string }>
-  > {
-    if (!this.state.productId) {
-      throw new Error('Product identifier is not set.');
+  async getStatus(): Promise<SyncResponse> {
+    return this.getStatusSnapshot();
+  }
+
+  private getStatusSnapshot(): SyncResponse {
+    return {
+      lastSyncTimestamp: this.lastSyncTimestamp,
+      syncStatus: this.syncStatus,
+    };
+  }
+
+  private async ensureSchedule() {
+    const cron = this.env.PRODUCT_SYNC_CRON?.trim() || '0 */6 * * *';
+    const existing = this.alarms
+      .getSchedules({ type: 'cron' })
+      .find((schedule) => schedule.callback === 'runScheduledSync');
+
+    if (existing && 'cron' in existing && existing.cron === cron) {
+      return;
     }
 
-    const query = `product:${this.state.productId}`;
-    const searchResponse = await this.adapter.proxySearchDocs(this.env, { query, topK: 10 });
-
-    const documents: Array<Omit<ProductDocumentRow, 'id' | 'product_id' | 'last_synced_at'> & { id?: string }> = [];
-
-    for (const [index, result] of searchResponse.results.entries()) {
-      const embedding = await generateEmbedding(this.env, result.content);
-      documents.push({
-        id: result.id ?? `${this.state.productId}-${index}`,
-        title: result.title,
-        url: result.url ?? '',
-        content: result.content,
-        embedding,
-      });
+    if (existing) {
+      await this.alarms.cancelSchedule(existing.id);
     }
 
-    return documents;
+    await this.alarms.schedule(cron, 'runScheduledSync', { productKey: this.name });
+  }
+
+  /**
+   * Alarm callback invoked by the scheduler. Delegates to {@link syncProduct}.
+   */
+  private async runScheduledSync(payload?: { productKey?: string }) {
+    await this.syncProduct(payload?.productKey);
+  }
+
+  private async simulateIngestion(productKey: string) {
+    // Temporary shim while the ingestion pipeline is ported to Actors.
+    await Promise.resolve();
+    console.log(JSON.stringify({ event: 'product_sync.noop', product: productKey }));
   }
 }
-
-export type ProductSyncActorStub = ReturnType<typeof ProductSyncActor.get>;

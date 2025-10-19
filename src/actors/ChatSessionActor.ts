@@ -1,202 +1,83 @@
+/**
+ * ChatSessionActor persists conversational state for a single session ID.
+ *
+ * It orchestrates each turn by delegating to the DocsAgent helper which in
+ * turn coordinates retrieval against the D1 corpus and optional LLM calls.
+ */
+
 import { Actor, Persist } from '@cloudflare/actors';
-import { D1Env, ProductDocumentRow, searchProductDocuments } from '../d1';
 
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
+import { createDocsAgent, type AgentMessage } from '../agents/docsAgent';
+import type { ChatSessionActorEnv } from '../env';
 
-export interface ChatSessionState {
-  sessionId: string;
-  messageHistory: ChatMessage[];
-  lastActivityTimestamp: number | null;
-  lastProductId: string | null;
-}
+const MAX_HISTORY_LENGTH = 50;
 
-export type ChatSessionActorEnv = D1Env & {
-  AI?: { run: (model: string, input: unknown) => Promise<unknown> };
-  AI_MODEL?: string;
+type RpcEnvelope = {
+  method: 'handleUserQuery' | 'getHistory';
+  params?: Record<string, unknown>;
 };
 
-interface HandleUserQueryOptions {
-  productId?: string;
-  topK?: number;
-}
-
 export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
-  // @ts-expect-error Cloudflare Actors decorator uses the Stage 3 field decorator signature.
+  // @ts-expect-error Decorators from @cloudflare/actors use TC39 semantics not yet modelled by tsc
   @Persist
-  private state: ChatSessionState = {
-    sessionId: '',
-    messageHistory: [],
-    lastActivityTimestamp: null,
-    lastProductId: null,
-  };
+  private messageHistory: AgentMessage[] = [];
 
-  protected async onInit(): Promise<void> {
-    if (!this.state.sessionId) {
-      this.state.sessionId = this.name ?? crypto.randomUUID();
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (request.method === 'POST' && url.pathname === '/rpc') {
+      const payload = (await request.json().catch(() => null)) as RpcEnvelope | null;
+      if (!payload || typeof payload.method !== 'string') {
+        return Response.json({ error: 'Invalid RPC payload.' }, { status: 400 });
+      }
+
+      if (payload.method === 'handleUserQuery') {
+        const sessionId = typeof payload.params?.sessionId === 'string' ? payload.params.sessionId : this.name;
+        const query = typeof payload.params?.query === 'string' ? payload.params.query : '';
+        if (!query.trim()) {
+          return Response.json({ error: 'Query must not be empty.' }, { status: 400 });
+        }
+        return Response.json(await this.handleUserQuery(sessionId ?? 'default', query));
+      }
+
+      if (payload.method === 'getHistory') {
+        return Response.json({ history: this.messageHistory });
+      }
+
+      return Response.json({ error: `Unknown RPC method ${payload.method}` }, { status: 400 });
     }
+
+    if (request.method === 'GET' && url.pathname === '/status') {
+      return Response.json({ historyLength: this.messageHistory.length });
+    }
+
+    return Response.json({ error: 'Not Found' }, { status: 404 });
   }
 
-  async handleUserQuery(query: string, options: HandleUserQueryOptions = {}): Promise<{
-    sessionId: string;
-    response: string;
-    documents: ProductDocumentRow[];
-  }> {
-    this.ensureSessionId();
+  async handleUserQuery(sessionId: string, query: string) {
+    const question = query.trim();
+    const userMessage: AgentMessage = { role: 'user', content: question };
+    const updatedHistory = [...this.messageHistory, userMessage];
 
-    const productId = options.productId ?? this.state.lastProductId ?? undefined;
-    this.state.messageHistory.push({ role: 'user', content: query });
-    this.state.lastActivityTimestamp = Date.now();
-    if (productId) {
-      this.state.lastProductId = productId;
-    }
+    const agent = createDocsAgent(this.env);
+    console.log(JSON.stringify({ event: 'chat.turn.start', sessionId, messageCount: updatedHistory.length }));
+    const response = await agent.runConversation(updatedHistory);
 
-    const documents = await searchProductDocuments(
-      this.env,
-      query,
-      options.topK ?? 5,
-      productId
+    const assistantMessage: AgentMessage = { role: 'assistant', content: response.answer };
+    this.messageHistory = [...updatedHistory, assistantMessage].slice(-MAX_HISTORY_LENGTH);
+
+    console.log(
+      JSON.stringify({
+        event: 'chat.turn.finish',
+        sessionId,
+        citations: response.citations.map((item) => item.url),
+      })
     );
-    const assistantReply = await this.generateAssistantReply(query, documents);
-
-    this.state.messageHistory.push({ role: 'assistant', content: assistantReply });
-    this.state.lastActivityTimestamp = Date.now();
 
     return {
-      sessionId: this.state.sessionId,
-      response: assistantReply,
-      documents,
+      reply: response.answer,
+      citations: response.citations,
+      historyLength: this.messageHistory.length,
     };
   }
-
-  async getHistory(): Promise<ChatMessage[]> {
-    this.ensureSessionId();
-    return [...this.state.messageHistory];
-  }
-
-  protected async onRequest(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const [, action] = url.pathname.split('/');
-
-    if (request.method === 'POST' && action === 'query') {
-      const raw = await request.json().catch(() => ({}));
-      const body = raw as Partial<{ query: string; productId: string; topK: number }>;
-      const query = typeof body.query === 'string' ? body.query : '';
-      const productId = typeof body.productId === 'string' ? body.productId : undefined;
-      const topK = typeof body.topK === 'number' ? body.topK : undefined;
-
-      if (!query) {
-        return Response.json({ error: 'Query is required.' }, { status: 400 });
-      }
-
-      try {
-        const result = await this.handleUserQuery(query, { productId, topK });
-        return Response.json(result);
-      } catch (error) {
-        return Response.json(
-          {
-            error: error instanceof Error ? error.message : 'Failed to process query.',
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    if (request.method === 'GET' && action === 'history') {
-      return Response.json({ sessionId: this.state.sessionId, history: await this.getHistory() });
-    }
-
-    return new Response('Not Found', { status: 404 });
-  }
-
-  private ensureSessionId(): void {
-    if (!this.state.sessionId) {
-      this.state.sessionId = this.name ?? crypto.randomUUID();
-    }
-  }
-
-  private async generateAssistantReply(
-    query: string,
-    documents: ProductDocumentRow[]
-  ): Promise<string> {
-    const historyContext = this.state.messageHistory
-      .map((message) => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`)
-      .join('\n');
-
-    const docsContext = documents
-      .map(
-        (doc, index) =>
-          `Document ${index + 1}: ${doc.title}\nURL: ${doc.url || 'N/A'}\nContent: ${doc.content.slice(0, 500)}`
-      )
-      .join('\n\n');
-
-    const prompt =
-      `You are a Cloudflare documentation assistant. Use the provided documentation snippets to answer the user's question.
-Existing conversation:
-${historyContext || 'No previous messages.'}
-
-Relevant documentation:
-${docsContext || 'No documents matched the query.'}
-
-User query: ${query}
-
-Provide a concise, technically accurate response that cites the relevant documents when possible.`;
-
-    if (this.env.AI && this.env.AI_MODEL) {
-      try {
-        const raw = await this.env.AI.run(this.env.AI_MODEL, { prompt });
-        const text = this.normalizeAIResponse(raw);
-        if (text) {
-          return text;
-        }
-      } catch (error) {
-        console.warn('AI generation failed, falling back to heuristic response.', error);
-      }
-    }
-
-    return this.createFallbackResponse(query, documents);
-  }
-
-  private normalizeAIResponse(raw: unknown): string {
-    if (typeof raw === 'string') {
-      return raw.trim();
-    }
-
-    if (Array.isArray(raw)) {
-      return raw.map((entry) => String(entry)).join('\n');
-    }
-
-    if (raw && typeof raw === 'object') {
-      if ('response' in raw && typeof (raw as any).response === 'string') {
-        return (raw as any).response.trim();
-      }
-      if ('output_text' in raw && typeof (raw as any).output_text === 'string') {
-        return (raw as any).output_text.trim();
-      }
-      if ('choices' in raw && Array.isArray((raw as any).choices)) {
-        const choice = (raw as any).choices[0];
-        if (choice && typeof choice.text === 'string') {
-          return choice.text.trim();
-        }
-      }
-    }
-
-    return '';
-  }
-
-  private createFallbackResponse(query: string, documents: ProductDocumentRow[]): string {
-    if (!documents.length) {
-      return `I couldn't find documentation matching "${query}". Please refine the request or try a different product.`;
-    }
-
-    const summary = documents
-      .map((doc, index) => `(${index + 1}) ${doc.title}${doc.url ? ` - ${doc.url}` : ''}`)
-      .join('\n');
-
-    return `Based on the documentation I found, here are some relevant references:\n${summary}`;
-  }
 }
-
-export type ChatSessionActorStub = ReturnType<typeof ChatSessionActor.get>;

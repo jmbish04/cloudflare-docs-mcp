@@ -1,102 +1,108 @@
+
 import { Hono } from 'hono';
-import type { Context } from 'hono';
-import {
-  ProductSyncActor,
-  ProductSyncActorEnv,
-  ProductSyncActorStub,
-} from './actors/ProductSyncActor';
-import { ChatSessionActor, ChatSessionActorEnv, ChatSessionActorStub } from './actors/ChatSessionActor';
+import type { DurableObjectNamespaceLike, DurableObjectStubLike, WorkerEnv } from './env';
+import type { DocsSearchResult } from './data/d1';
 
-type Bindings = ProductSyncActorEnv &
-  ChatSessionActorEnv & {
-    PRODUCT_SYNC_ACTOR: DurableObjectNamespace;
-    CHAT_SESSION_ACTOR: DurableObjectNamespace;
-  };
+export type Bindings = WorkerEnv;
 
-const app = new Hono<{ Bindings: Bindings }>();
+export function createApp() {
+  const app = new Hono<{ Bindings: Bindings }>();
 
-app.post('/api/sync/product/:id', async (c) => {
-  const id = c.req.param('id');
-  const actor = ProductSyncActor.get(id);
-  const { status, payload } = await callActor(actor, '/sync', { method: 'POST' });
-  return respondJson(payload, status);
-});
+  app.post('/api/sync/:product', async (c) => {
+    const product = c.req.param('product')?.trim();
+    if (!product) {
+      return c.json({ error: 'Product identifier is required.' }, 400);
+    }
 
-app.get('/api/sync/status/:id', async (c) => {
-  const id = c.req.param('id');
-  const actor = ProductSyncActor.get(id);
-  const { status, payload } = await callActor(actor, '/status');
-  return respondJson(payload, status);
-});
+    const response = await invokeActor<SyncActorResponse>(
+      c.env.PRODUCT_SYNC_ACTOR,
+      product,
+      'syncProduct',
+      { productKey: product }
+    );
 
-app.post('/api/chat', async (c) => handleChatRequest(c, crypto.randomUUID()));
+    return c.json(response);
+  });
 
-app.post('/api/chat/:sessionId', async (c) => handleChatRequest(c, c.req.param('sessionId')));
+  app.post('/api/chat/:sessionId', async (c) => {
+    const sessionId = c.req.param('sessionId')?.trim() || 'default';
+    const body = (await c.req.json<{ query?: string }>().catch(() => ({}))) as {
+      query?: string;
+    };
 
-app.get('/api/chat/:sessionId/history', async (c) => {
-  const sessionId = c.req.param('sessionId');
-  const actor = ChatSessionActor.get(sessionId);
-  const { status, payload } = await callActor(actor, '/history');
-  return respondJson(payload, status);
-});
-
-app.notFound((c) => c.json({ error: 'Not Found' }, 404));
-
-async function handleChatRequest(c: Context<{ Bindings: Bindings }>, sessionId: string) {
-  try {
-    const raw = await c.req.json().catch(() => ({}));
-    const body = raw as Partial<{ query: string; productId: string; topK: number }>;
-    if (!body?.query) {
+    const query = typeof body.query === 'string' ? body.query.trim() : '';
+    if (!query) {
       return c.json({ error: 'Query is required.' }, 400);
     }
 
-    const actor = ChatSessionActor.get(sessionId);
-    const { status, payload } = await callActor(actor, '/query', {
-      method: 'POST',
-      body: JSON.stringify(body),
-      headers: { 'content-type': 'application/json' },
-    });
+    const response = await invokeActor<ChatActorResponse>(
+      c.env.CHAT_SESSION_ACTOR,
+      sessionId,
+      'handleUserQuery',
+      { sessionId, query }
+    );
 
-    if (payload && typeof payload === 'object' && !Array.isArray(payload) && !('sessionId' in payload)) {
-      (payload as Record<string, unknown>).sessionId = sessionId;
-    }
-
-    return respondJson(payload, status);
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Failed to process chat request.' }, 500);
-  }
-}
-
-async function callActor<T = unknown>(
-  actor: ProductSyncActorStub | ChatSessionActorStub,
-  path: string,
-  init?: RequestInit
-): Promise<{ status: number; payload: T | { error: string } }> {
-  const response = await actor.fetch(`https://actor${path}`, init);
-  const text = await response.text();
-  let payload: T | { error: string };
-
-  try {
-    payload = text ? (JSON.parse(text) as T) : ({} as T);
-  } catch (error) {
-    payload = {
-      error: `Failed to parse response from actor: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    } as { error: string };
-  }
-
-  if (!response.ok && (typeof payload !== 'object' || payload === null || Array.isArray(payload))) {
-    payload = { error: `Actor responded with status ${response.status}` } as { error: string };
-  }
-
-  return { status: response.status, payload };
-}
-
-function respondJson(payload: unknown, status: number): Response {
-  return new Response(JSON.stringify(payload ?? null), {
-    status,
-    headers: { 'content-type': 'application/json' },
+    return c.json(response);
   });
+
+  app.get('/healthz', (c) => c.json({ status: 'ok' }));
+
+  app.notFound((c) => c.json({ error: 'Not Found' }, 404));
+
+  app.onError((error, c) => {
+    console.error('Unhandled worker error', error);
+    return c.json({ error: 'Internal Server Error' }, 500);
+  });
+
+  return app;
 }
 
+const app = createApp();
 export default app;
-export { ProductSyncActor, ChatSessionActor };
+
+type SyncActorResponse = {
+  lastSyncTimestamp: number;
+  syncStatus: 'idle' | 'in_progress' | 'success' | 'failed';
+  message?: string;
+};
+
+type ChatActorResponse = {
+  reply: string;
+  citations: DocsSearchResult[];
+  historyLength: number;
+};
+
+async function invokeActor<T>(
+  namespace: DurableObjectNamespaceLike,
+  name: string,
+  method: string,
+  params: Record<string, unknown>
+): Promise<T> {
+  const stub = namespace.getByName(name);
+  await ensureActorName(stub, name);
+
+  const response = await stub.fetch('https://actor.local/rpc', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ method, params }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => 'Actor invocation failed.');
+    throw new Error(`Actor ${name} responded with ${response.status}: ${message}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function ensureActorName(stub: DurableObjectStubLike, name: string) {
+  const maybe = (stub as unknown as { setName?: (id: string) => Promise<void> }).setName;
+  if (typeof maybe === 'function') {
+    try {
+      await maybe.call(stub, name);
+    } catch (error) {
+      console.warn('Failed to set actor name via Actors SDK helper.', error);
+    }
+  }
+}
+
