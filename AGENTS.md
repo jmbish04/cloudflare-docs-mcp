@@ -24,7 +24,7 @@ The primary goal of this worker is to function as an **intelligent orchestrator*
 
 5.  **Feedback Loop & Logging:** Every transaction (tool execution, D1 query, etc.) will be logged to a D1 `transactions` table, providing a full audit trail. A feedback mechanism will allow clients to report on the effectiveness of solutions, which will be used to curate the D1 knowledge base.
 
-5.  **Dual API Exposure:** The worker will be accessible via two primary interfaces:
+6.  **Dual API Exposure:** The worker will be accessible via two primary interfaces:
     *   **MCP (Model-Context-Protocol):** A `POST /mcp` endpoint for direct interaction with Gemini and other MCP-compatible agents.
     *   **Public API (WebSocket):** A public-facing endpoint (e.g., `POST /api/chat`) with a generated OpenAPI 3.1.0 schema, specifically for integration with third-party tools like ChatGPT Custom Actions. The primary protocol will evolve to WebSockets for interactive sessions.
 
