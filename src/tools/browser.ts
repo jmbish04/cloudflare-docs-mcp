@@ -19,7 +19,7 @@ export class BrowserRender {
   constructor(accountId: string, apiToken?: string) {
     if (!accountId) { throw new Error("Cloudflare account ID is required."); }
     this.accountId = accountId;
-    this.client = new Cloudflare({ apiToken: apiToken || process.env.CLOUDFLARE_API_TOKEN });
+    this.client = new Cloudflare({ apiToken });
   }
 
   public async takeScreenshot(params: ScreenshotParams): Promise<Stream> {
