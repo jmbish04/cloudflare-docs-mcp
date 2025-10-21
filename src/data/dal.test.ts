@@ -137,7 +137,7 @@ describe('DataAccessLayer', () => {
   it('returns null when feasibility job is missing', async () => {
     const { db } = createMockD1(async () => null);
     const dal = new DataAccessLayer(db);
-    const job = await dal.getFeasibilityJob(99);
+    const job = await dal.getFeasibilityJob('job-99');
     expect(job).toBeNull();
   });
 });
