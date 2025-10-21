@@ -17,8 +17,28 @@ import { CloudflareDocsTool } from '../tools/cloudflare_docs';
 import { RAGTool } from '../tools/rag_tool';
 
 const ToolCallSchema = z.object({
-  tool: z.string().describe("The name of the tool to call."),
-  args: z.any().describe("The arguments to pass to the tool."),
+  tool: z
+    .string()
+    .describe("The name of the tool to call (e.g., 'sandbox', 'github_api')."),
+  args: z
+    .object({
+      subcommand: z.string().optional().describe("For tools with multiple functions (e.g., 'github_api')."),
+      query: z.string().optional(),
+      filename: z
+        .string()
+        .optional()
+        .describe("The name of the file to write in the sandbox (e.g., 'test.js')."),
+      code: z
+        .string()
+        .optional()
+        .describe("The code to write to the file."),
+      command: z
+        .string()
+        .optional()
+        .describe("The shell command to execute in the sandbox."),
+    })
+    .passthrough()
+    .describe("The arguments to pass to the tool."),
 });
 
 const ResearchPlanSchema = z.object({
@@ -245,6 +265,12 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
         ---
 
         User Query: "${finalQuery}"
+
+        Available Tools:
+        - You have access to a sandbox tool. You can use it in two ways:
+          1. Execute a shell command: {"tool": "sandbox", "args": {"command": "ls -l"}}
+          2. Write and run a script: {"tool": "sandbox", "args": {"filename": "verify.js", "code": "console.log(1+1);"}}
+        Use the sandbox to verify information or perform calculations when necessary.
       `.trim();
       const planResult = await this.structuredResponseTool.analyzeText(ResearchPlanSchema, planPrompt);
 
@@ -319,7 +345,14 @@ Synthesize a final answer.`;
             return { error: `GitHub subcommand ${args.subcommand} not found.` };
         }
       case 'browser': return this.browser.scrape({ url: args.url, elements: args.elements });
-      case 'sandbox': return this.sandbox.exec(args.command);
+      case 'sandbox':
+        if (args?.code && args?.filename) {
+          return this.sandbox.runScript(args.filename, args.code);
+        }
+        if (args?.command) {
+          return this.sandbox.exec(args.command);
+        }
+        return { error: 'Sandbox tool requires either a `command` or `code` and `filename`.' };
       case 'cloudflare_docs': return this.cloudflareDocs.search(args.query);
       // ... other tool cases
       default: return { error: `Tool ${toolName} not found.` };

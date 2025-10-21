@@ -34,4 +34,24 @@ export class SandboxTool {
   public async runCode(contextId: string, code: string): Promise<CodeExecutionResult> { return this.sandbox.runCode(contextId, code); }
   public async deleteCodeContext(contextId: string): Promise<void> { await this.sandbox.deleteCodeContext(contextId); }
   public async cloneRepo(repoUrl: string, options?: CloneRepoOptions): Promise<void> { await this.sandbox.gitCheckout(repoUrl, options); }
+
+  /**
+   * Writes a script to a file and executes it with node.
+   * @param filename The name of the script file (e.g., 'script.js').
+   * @param code The JavaScript/TypeScript code to execute.
+   * @returns The execution result.
+   */
+  public async runScript(filename: string, code: string): Promise<ExecResult> {
+    await this.writeFile(filename, code);
+    try {
+      const result = await this.exec(`node ${filename}`);
+      return result;
+    } finally {
+      try {
+        await this.deleteFile(filename);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
 }
