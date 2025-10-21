@@ -93,7 +93,7 @@ export class GitHubTool {
       title: item.title,
       url: item.html_url,
       number: item.number,
-      state: (item.state as 'open' | 'closed') ?? 'open',
+      state: item.state as 'open' | 'closed',
       author: item.user?.login ?? 'unknown',
       body: item.body ?? null,
     }));
