@@ -23,6 +23,25 @@ const ResearchPlanSchema = z.object({
   tool_calls: z.array(ToolCallSchema).describe("The sequence of tool calls required to execute the plan."),
 });
 
+const ClarificationCheckSchema = z.object({
+  needsClarification: z
+    .boolean()
+    .describe(
+      "Set to true if the user's query is ambiguous, too broad, or lacks specific details to create a concrete research plan.",
+    ),
+  clarifyingQuestion: z
+    .string()
+    .optional()
+    .describe("If needsClarification is true, pose a specific question to the user to narrow down their request."),
+});
+
+type ClarificationCheck = z.infer<typeof ClarificationCheckSchema>;
+
+interface ClarificationContext {
+  originalQuery: string;
+  clarifications: string[];
+}
+
 interface AgentMessage { role: 'user' | 'assistant'; content: string; }
 
 export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
@@ -130,11 +149,73 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
   async handleUserQuery(sessionId: string, query: string): Promise<object> {
     try {
       await logTransaction(this.env, sessionId, 'USER_QUERY', { query });
+
+      const awaitingKey = 'isAwaitingClarification';
+      const contextKey = 'clarificationContext';
+      const isAwaitingClarification = await this.state.storage.get<boolean>(awaitingKey);
+      let clarificationContext = isAwaitingClarification
+        ? await this.state.storage.get<ClarificationContext>(contextKey)
+        : undefined;
+
+      const getOriginalQuery = (): string => {
+        if (clarificationContext?.originalQuery) return clarificationContext.originalQuery;
+        const firstUserMessage = this.messageHistory.find((msg) => msg.role === 'user');
+        return firstUserMessage?.content ?? query;
+      };
+
+      const formatFinalQuery = (original: string, clarifications: string[]): string => {
+        if (!clarifications.length) return original;
+        const formattedClarifications = clarifications.map((item, index) => `(${index + 1}) "${item}"`).join(' ');
+        return `Original question was: "${original}". The user provided additional clarification(s): ${formattedClarifications}.`;
+      };
+
+      let finalQuery = query;
+
+      if (isAwaitingClarification) {
+        const originalQuery = getOriginalQuery();
+        const previousClarifications = clarificationContext?.clarifications ?? [];
+        const combinedClarifications = [...previousClarifications, query];
+        finalQuery = formatFinalQuery(originalQuery, combinedClarifications);
+        clarificationContext = { originalQuery, clarifications: combinedClarifications };
+      }
+
       this.messageHistory.push({ role: 'user', content: query });
+
+      const clarificationPrompt =
+        `You are assessing whether the following user query requires clarification before creating a research plan.\n` +
+        `If the query is ambiguous, too broad, or missing critical details, respond with needsClarification set to true and ` +
+        `provide a single, specific clarifying question. If the query is sufficiently clear, respond with needsClarification set to false.\n` +
+        `Query: "${finalQuery}"`;
+
+      const clarificationResult = await this.structuredResponseTool.analyzeText(
+        ClarificationCheckSchema,
+        clarificationPrompt,
+      );
+
+      const clarificationDecision: ClarificationCheck | undefined =
+        clarificationResult.success && clarificationResult.structuredResult
+          ? clarificationResult.structuredResult
+          : undefined;
+
+      if (clarificationDecision?.needsClarification) {
+        const question =
+          clarificationDecision.clarifyingQuestion?.trim() || 'Could you please provide more details about what you need?';
+        this.sendUpdate('clarification_needed', { question });
+        this.messageHistory.push({ role: 'assistant', content: question });
+
+        await this.state.storage.put(awaitingKey, true);
+        const contextToStore =
+          clarificationContext ?? ({ originalQuery: finalQuery, clarifications: [] } satisfies ClarificationContext);
+        await this.state.storage.put(contextKey, contextToStore);
+        return { sessionId, response: question };
+      }
+
+      await this.state.storage.delete(awaitingKey);
+      await this.state.storage.delete(contextKey);
 
       this.sendUpdate('status', { message: 'Creating research plan...' });
 
-      const planPrompt = `Create a research plan to answer the query: "${query}".`;
+      const planPrompt = `Create a research plan to answer the query: "${finalQuery}".`;
       const planResult = await this.structuredResponseTool.analyzeText(ResearchPlanSchema, planPrompt);
 
       if (!planResult.success || !planResult.structuredResult) {
@@ -165,7 +246,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
 
       this.sendUpdate('status', { message: 'Synthesizing final answer...' });
 
-      const synthesisPrompt = `Query: "${query}"
+      const synthesisPrompt = `Query: "${finalQuery}"
 
 Tool Results:
 ${JSON.stringify(toolResults, null, 2)}
