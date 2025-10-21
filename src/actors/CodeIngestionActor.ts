@@ -7,6 +7,7 @@
 
 import { Actor } from '@cloudflare/actors';
 import type { CodeIngestionActorEnv } from '../env';
+import { DataAccessLayer } from '../data/dal';
 
 /**
  * @class CodeIngestionActor
@@ -66,7 +67,8 @@ export class CodeIngestionActor extends Actor<CodeIngestionActorEnv> {
    */
   async test(): Promise<Response> {
     try {
-      await this.env.DB.prepare('SELECT 1').run();
+      const dal = new DataAccessLayer(this.env.DB);
+      await dal.ping();
       const testKey = `health_check_ingestion`;
       await (this.env as any).AGENT_CACHE.put(testKey, 'ok');
       const value = await (this.env as any).AGENT_CACHE.get(testKey);

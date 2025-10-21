@@ -6,6 +6,7 @@
 import type { WorkerEnv } from './env';
 import { sanitizeAIResponse } from './utils';
 import { ToolService } from './tools';
+import { DataAccessLayer } from './data/dal';
 
 type CheckResult = {
   component: string;
@@ -21,9 +22,10 @@ type CheckResult = {
  * @returns {Promise<{ overall_status: 'PASS' | 'FAIL', results: CheckResult[], ai_summary: string }>}
  */
 export async function runHealthCheck(env: WorkerEnv): Promise<{ overall_status: 'PASS' | 'FAIL', results: CheckResult[], ai_summary: string }> {
+  const dal = new DataAccessLayer(env.DB);
   // Run foundational checks first.
   const foundationalChecks: Promise<CheckResult>[] = [
-    checkD1(env),
+    checkD1(dal),
     checkKV(env),
     checkQueues(env),
   ];
@@ -48,8 +50,7 @@ export async function runHealthCheck(env: WorkerEnv): Promise<{ overall_status: 
 
   // Store the result in D1
   try {
-    const stmt = env.DB.prepare('INSERT INTO health_checks (overall_status, results_data) VALUES (?, ?)');
-    await stmt.bind(overall_status, JSON.stringify({ results: allResults, ai_summary })).run();
+    await dal.logHealthCheck(overall_status, { results: allResults, ai_summary });
   } catch (dbError) {
     console.error("Failed to store health check results in D1:", dbError);
     allResults.push({ component: 'HealthCheckStorage', status: 'FAIL', error: dbError.message });
@@ -60,9 +61,9 @@ export async function runHealthCheck(env: WorkerEnv): Promise<{ overall_status: 
 
 // --- Individual Check Functions ---
 
-async function checkD1(env: WorkerEnv): Promise<CheckResult> {
+async function checkD1(dal: DataAccessLayer): Promise<CheckResult> {
   try {
-    await env.DB.prepare('SELECT 1').run();
+    await dal.ping();
     return { component: 'D1 Database', status: 'PASS' };
   } catch (e) {
     return { component: 'D1 Database', status: 'FAIL', error: e.message };

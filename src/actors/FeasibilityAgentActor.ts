@@ -6,6 +6,7 @@
 
 import { Actor } from '@cloudflare/actors';
 import type { FeasibilityAgentActorEnv } from '../env';
+import { DataAccessLayer } from '../data/dal';
 
 /**
  * @class FeasibilityAgentActor
@@ -32,11 +33,9 @@ export class FeasibilityAgentActor extends Actor<FeasibilityAgentActorEnv> {
       const uuid = crypto.randomUUID();
 
       // 1. Create a job record in the D1 database
-      const { results } = await this.env.DB.prepare(
-        'INSERT INTO feasibility_jobs (uuid, request_prompt, status) VALUES (?, ?, ?) RETURNING id'
-      ).bind(uuid, prompt, 'QUEUED').all();
-
-      const jobId = results[0].id;
+      const dal = new DataAccessLayer(this.env.DB);
+      const job = await dal.createFeasibilityJob(prompt, uuid);
+      const jobId = job.id;
 
       // 2. Dispatch the job to the queue for processing
       await this.env.FEASIBILITY_QUEUE.send({
@@ -64,7 +63,8 @@ export class FeasibilityAgentActor extends Actor<FeasibilityAgentActorEnv> {
    */
   async test(): Promise<Response> {
     try {
-      await this.env.DB.prepare('SELECT 1').run();
+      const dal = new DataAccessLayer(this.env.DB);
+      await dal.ping();
       const testKey = `health_check_feasibility`;
       await (this.env as any).AGENT_CACHE.put(testKey, 'ok');
       const value = await (this.env as any).AGENT_CACHE.get(testKey);
