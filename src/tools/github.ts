@@ -55,7 +55,7 @@ export class GitHubTool {
     return response.data as unknown as string;
   }
 
-  async getRepoContents(owner: string, repo: string, path: string = ''): Promise<any> {
+  async getRepoContents(owner: string, repo: string, path: string = ''): Promise<Endpoints['GET /repos/{owner}/{repo}/contents/{path}']['response']['data']> {
     const response = await this.client.rest.repos.getContent({
       owner,
       repo,
