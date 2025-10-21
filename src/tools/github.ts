@@ -1,83 +1,137 @@
 /**
  * @file src/tools/github.ts
- * @description This module provides a dedicated interface for interacting with the GitHub API.
- * It handles authentication and abstracts the logic for fetching repository contents,
- * pull request diffs, and other essential GitHub data.
+ * @description Provides a high-level adapter around the GitHub REST API via Octokit.
  */
 
+import { Octokit } from '@octokit/rest';
 import type { CoreEnv } from '../env';
 
-const GITHUB_API_BASE = 'https://api.github.com';
+const USER_AGENT = 'Cloudflare-AI-Research-Assistant';
 
-/**
- * @class GitHubService
- * @description A service for making authenticated requests to the GitHub API.
- */
-export class GitHubService {
-  private token: string;
+export interface Repository {
+  owner: string;
+  repo: string;
+  fullName: string;
+  description: string | null;
+  stars: number;
+  url: string;
+}
+
+export interface Issue {
+  title: string;
+  url: string;
+  number: number;
+  state: 'open' | 'closed';
+  author: string;
+  body: string | null;
+}
+
+export class GitHubTool {
+  private client: Octokit;
 
   constructor(env: CoreEnv) {
-    // In a real environment, the GITHUB_TOKEN would be a secret.
-    this.token = (env as any).GITHUB_TOKEN;
-    if (!this.token) {
+    const token = (env as any).GITHUB_TOKEN as string | undefined;
+
+    this.client = new Octokit({
+      auth: token,
+      userAgent: USER_AGENT,
+    });
+
+    if (!token) {
       console.warn('GITHUB_TOKEN secret is not set. GitHub API requests will be unauthenticated and rate-limited.');
     }
   }
 
-  private async request(path: string): Promise<any> {
-    const headers: HeadersInit = {
-      'User-Agent': 'Cloudflare-AI-Research-Assistant',
-      'Accept': 'application/vnd.github.v3+json',
-    };
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    const response = await fetch(`${GITHUB_API_BASE}${path}`, { headers });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`GitHub API request to ${path} failed with status ${response.status}: ${errorText}`);
-    }
-    return response.json();
-  }
-
-  /**
-   * @method getPullRequestDiff
-   * @description Fetches the diff for a specific pull request.
-   * @param {string} owner - The repository owner.
-   * @param {string} repo - The repository name.
-   * @param {number} prNumber - The pull request number.
-   * @returns {Promise<string>} The raw diff content.
-   */
   async getPullRequestDiff(owner: string, repo: string, prNumber: number): Promise<string> {
-    const path = `/repos/${owner}/${repo}/pulls/${prNumber}`;
-    const headers: HeadersInit = {
-      'User-Agent': 'Cloudflare-AI-Research-Assistant',
-      'Accept': 'application/vnd.github.v3.diff', // Request the diff format
-    };
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
+    const response = await this.client.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+      owner,
+      repo,
+      pull_number: prNumber,
+      headers: {
+        Accept: 'application/vnd.github.v3.diff',
+      },
+    });
 
-    const response = await fetch(`${GITHUB_API_BASE}${path}`, { headers });
-
-    if (!response.ok) {
-      throw new Error(`GitHub API request for PR diff failed with status ${response.status}`);
-    }
-    return response.text();
+    return response.data as unknown as string;
   }
 
-  /**
-   * @method getRepoContents
-   * @description Fetches the contents of a directory in a repository.
-   * @param {string} owner - The repository owner.
-   * @param {string} repo - The repository name.
-   * @param {string} path - The path to the directory or file.
-   * @returns {Promise<any>} The file or directory content metadata.
-   */
   async getRepoContents(owner: string, repo: string, path: string = ''): Promise<any> {
-    const repoPath = `/repos/${owner}/${repo}/contents/${path}`;
-    return this.request(repoPath);
+    const response = await this.client.rest.repos.getContent({
+      owner,
+      repo,
+      path: path || '',
+    });
+
+    return response.data;
+  }
+
+  async searchRepositories(query: string, language?: string, limit: number = 10): Promise<Repository[]> {
+    const searchQuery = language ? `${query} language:${language}` : query;
+    const response = await this.client.rest.search.repos({
+      q: searchQuery,
+      per_page: limit,
+    });
+
+    return response.data.items.map((item) => ({
+      owner: item.owner?.login ?? '',
+      repo: item.name,
+      fullName: item.full_name,
+      description: item.description,
+      stars: item.stargazers_count,
+      url: item.html_url,
+    }));
+  }
+
+  async searchIssues(query: string, repoFullName?: string, limit: number = 10): Promise<Issue[]> {
+    const scopedQuery = repoFullName ? `${query} repo:${repoFullName}` : query;
+    const response = await this.client.rest.search.issuesAndPullRequests({
+      q: scopedQuery,
+      per_page: limit,
+    });
+
+    return response.data.items.map((item) => ({
+      title: item.title,
+      url: item.html_url,
+      number: item.number,
+      state: (item.state as 'open' | 'closed') ?? 'open',
+      author: item.user?.login ?? 'unknown',
+      body: item.body ?? null,
+    }));
+  }
+
+  async getFileContent(owner: string, repo: string, path: string): Promise<{ content: string; path: string } | null> {
+    try {
+      const response = await this.client.rest.repos.getContent({ owner, repo, path });
+      const data = response.data;
+
+      if (Array.isArray(data) || !('type' in data) || data.type !== 'file' || !('content' in data)) {
+        return null;
+      }
+
+      const encoded = (data as { content?: string }).content;
+      if (!encoded) {
+        return null;
+      }
+
+      const content = this.decodeBase64(encoded);
+      return { content, path: data.path };
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'status' in error && (error as { status?: number }).status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private decodeBase64(value: string): string {
+    const normalized = value.replace(/\s+/g, '');
+
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(normalized, 'base64').toString('utf-8');
+    }
+
+    const binaryString = atob(normalized);
+    const bytes = Uint8Array.from(binaryString, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
   }
 }
