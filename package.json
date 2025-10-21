@@ -9,8 +9,8 @@
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate:local": "wrangler d1 migrations apply --local",
-    "migrate:remote": "wrangler d1 migrations apply --remote",
+    "migrate:local": "wrangler d1 migrations DB apply --local",
+    "migrate:remote": "wrangler d1 migrations DB apply --remote",
     "build:css": "tailwindcss -i ./src/input.css -o ./public/assets/css/style.css"
   },
   "dependencies": {
