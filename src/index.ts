@@ -1,6 +1,21 @@
 /**
  * @file src/index.ts
- * @description Main worker entry point, router, and API definitions.
+ * @description
+ *   This is the main entry point for the Cloudflare Docs AI/MCP Worker.
+ *
+ *   It exposes a unified API for AI-driven research, code analysis, and
+ *   knowledge curation, leveraging Cloudflare's ecosystem of Workers AI,
+ *   Durable Objects, D1, Vectorize, and Queues.
+ *
+ *   The worker is architected around a set of stateful actors (Durable Objects)
+ *   that manage long-running, complex tasks, ensuring resilience and
+ *   scalability.
+ *
+ * @see
+ *   - AGENTS.md: For an overview of the agentic architecture.
+ *   - PRODUCT_VISION.md: For the high-level product goals.
+ *   - GEMINI.md: For development context and conventions.
+ *   - wrangler.toml: For configuration and bindings.
  */
 
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
