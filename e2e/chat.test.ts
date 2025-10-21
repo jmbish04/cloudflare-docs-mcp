@@ -30,7 +30,7 @@ class MockWebSocket {
   close() {}
 }
 
-globalThis.WebSocketPair = class {
+vi.stubGlobal('WebSocketPair', class {
   readonly 0;
   readonly 1;
   constructor() {
@@ -41,7 +41,7 @@ globalThis.WebSocketPair = class {
     this[0] = client;
     this[1] = server;
   }
-};
+});
 
 const jsonResponse = (data: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(data), {
