@@ -25,6 +25,7 @@ import { CodeIngestionActor } from './actors/CodeIngestionActor';
 import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
 import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
+import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
 
 const app = new OpenAPIHono<{ Bindings: Bindings }>();
 
@@ -57,31 +58,44 @@ app.openapi(feasibilityRoute, async (c) => {
 
 const jobStatusRoute = createRoute({ method: 'get', path: '/api/feasibility/status/:id', responses: { 200: { content: { 'application/json': { schema: JobStatusSchema }}}}});
 app.openapi(jobStatusRoute, async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT * FROM feasibility_jobs WHERE id = ?1 OR uuid = ?1').bind(c.req.param('id')).all();
-  return results.length ? c.json(results[0]) : c.json({ error: 'Job not found' }, 404);
+  const dal = new DataAccessLayer(c.env.DB);
+  const job = await dal.getFeasibilityJob(c.req.param('id'));
+  return job ? c.json(job) : c.json({ error: 'Job not found' }, 404);
 });
 
 const jobsRoute = createRoute({ method: 'get', path: '/api/jobs', responses: { 200: { content: { 'application/json': { schema: JobListSchema }}}}});
 app.openapi(jobsRoute, async (c) => {
   const { status, sortBy, q } = c.req.query();
-  let query = 'SELECT id, uuid, status, request_prompt, created_at FROM feasibility_jobs';
-  const params: any[] = [];
-  const conditions: string[] = [];
-  if (q) { conditions.push('request_prompt LIKE ?'); params.push(`%${q}%`); }
-  if (status) { conditions.push('status = ?'); params.push(status); }
-  if (conditions.length > 0) { query += ' WHERE ' + conditions.join(' AND '); }
-  query += ` ORDER BY created_at ${sortBy === 'asc' ? 'ASC' : 'DESC'}`;
-  const { results } = await c.env.DB.prepare(query).bind(...params).all();
-  return c.json(results);
+  const dal = new DataAccessLayer(c.env.DB);
+  const allowedStatuses: FeasibilityJobStatus[] = ['QUEUED', 'IN_PROGRESS', 'COMPLETED', 'FAILED'];
+  const statusFilter = allowedStatuses.includes(status as FeasibilityJobStatus)
+    ? (status as FeasibilityJobStatus)
+    : undefined;
+  const jobs = await dal.listFeasibilityJobs({
+    status: statusFilter,
+    query: q,
+    sortDirection: sortBy === 'asc' ? 'ASC' : 'DESC',
+  });
+  return c.json(
+    jobs.map(({ id, uuid, status: jobStatus, request_prompt, created_at }) => ({
+      id,
+      uuid,
+      status: jobStatus,
+      request_prompt,
+      created_at,
+    }))
+  );
 });
 
 const jobPacketRoute = createRoute({ method: 'get', path: '/api/jobs/:id/packet', responses: { 200: { content: { 'application/json': { schema: JobPacketSchema }}}}});
 app.openapi(jobPacketRoute, async (c) => {
-  const jobResults = await c.env.DB.prepare('SELECT * FROM feasibility_jobs WHERE (id = ?1 OR uuid = ?1) AND status = \'COMPLETED\'').bind(c.req.param('id')).all();
-  if (jobResults.results.length === 0) return c.json({ error: 'Job not found or not complete' }, 404);
-  const job = jobResults.results[0];
-  const analysisResults = await c.env.DB.prepare('SELECT * FROM repository_analysis WHERE job_id = ?').bind(job.id).all();
-  return c.json({ job, analysis: analysisResults.results });
+  const dal = new DataAccessLayer(c.env.DB);
+  const job = await dal.getFeasibilityJob(c.req.param('id'));
+  if (!job || job.status !== 'COMPLETED') {
+    return c.json({ error: 'Job not found or not complete' }, 404);
+  }
+  const analysis = await dal.listRepositoryAnalysisForJob(job.id);
+  return c.json({ job, analysis });
 }, authMiddleware);
 
 const ingestRoute = createRoute({ method: 'post', path: '/api/ingest', request: { body: { content: { 'application/json': { schema: IngestionRequestSchema }}}}, responses: { 202: { content: { 'application/json': { schema: IngestionResponseSchema }}}}});
@@ -94,15 +108,17 @@ app.openapi(ingestRoute, async (c) => {
 app.post('/api/library/highlight', authMiddleware, async (c) => {
   const { source, id, highlighted } = await c.req.json();
   if (source === 'd1') {
-    await c.env.DB.prepare('UPDATE curated_knowledge SET is_highlighted = ?, time_highlighted = ? WHERE id = ?').bind(highlighted, highlighted ? new Date().toISOString() : null, id).run();
+    const dal = new DataAccessLayer(c.env.DB);
+    await dal.setCuratedKnowledgeHighlight(id, highlighted, highlighted ? new Date().toISOString() : null);
     return c.json({ status: 'ok' });
   }
   return c.json({ error: 'Source not supported' }, 400);
 });
 
 app.get('/api/library/d1', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT id, title, tags, is_highlighted FROM curated_knowledge WHERE is_active = TRUE').all();
-  return c.json(results);
+  const dal = new DataAccessLayer(c.env.DB);
+  const entries = await dal.listActiveCuratedKnowledgeSummaries();
+  return c.json(entries);
 });
 
 app.get('/api/library/kv', async (c) => {
@@ -112,8 +128,9 @@ app.get('/api/library/kv', async (c) => {
 
 app.post('/api/health/run', authMiddleware, async (c) => c.json(await runHealthCheck(c.env)));
 app.get('/api/health/status', async (c) => {
-    const { results } = await c.env.DB.prepare('SELECT * FROM health_checks ORDER BY timestamp DESC LIMIT 1').all();
-    return results.length ? c.json(results[0]) : c.json({ message: 'No health checks run yet' }, 404);
+    const dal = new DataAccessLayer(c.env.DB);
+    const latest = await dal.getLatestHealthCheck();
+    return latest ? c.json(latest) : c.json({ message: 'No health checks run yet' }, 404);
 });
 app.get('/healthz', (c) => c.json({ status: 'ok' }));
 

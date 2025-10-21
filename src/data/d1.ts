@@ -5,6 +5,7 @@
  */
 
 import type { CoreEnv } from '../env';
+import { DataAccessLayer, type TransactionEventType } from './dal';
 
 /**
  * @function logTransaction
@@ -20,14 +21,19 @@ import type { CoreEnv } from '../env';
 export async function logTransaction(
   env: CoreEnv,
   sessionId: string,
-  eventType: string,
+  eventType: TransactionEventType,
   eventData: object
 ): Promise<void> {
   try {
-    const stmt = env.DB.prepare(
-      'INSERT INTO transactions (session_id, event_type, event_data, status) VALUES (?, ?, ?, ?)'
-    );
-    await stmt.bind(sessionId, eventType, JSON.stringify(eventData), 'SUCCESS').run();
+    const dal = new DataAccessLayer(env.DB);
+    await dal.createTransaction({
+      session_id: sessionId,
+      event_type: eventType,
+      event_data: JSON.stringify(eventData),
+      status: 'SUCCESS',
+      error_message: null,
+      duration_ms: null,
+    });
   } catch (error) {
     console.error(`Failed to log transaction for session ${sessionId}:`, error);
     // In a real-world scenario, you might want to have a fallback logging mechanism.
@@ -43,9 +49,6 @@ export async function logTransaction(
  * @returns {Promise<Array<any>>} A promise that resolves to an array of matching knowledge entries.
  */
 export async function queryCuratedKnowledge(env: CoreEnv, query: string): Promise<Array<any>> {
-  // This is a placeholder for a more sophisticated search.
-  // A real implementation would use full-text search or keyword matching against tags.
-  const stmt = env.DB.prepare('SELECT * FROM curated_knowledge WHERE content LIKE ? OR tags LIKE ?');
-  const { results } = await stmt.bind(`%${query}%`, `%${query}%`).all();
-  return results;
+  const dal = new DataAccessLayer(env.DB);
+  return dal.searchCuratedKnowledge(query);
 }
