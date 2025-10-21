@@ -43,7 +43,7 @@ export class GitHubTool {
   }
 
   async getPullRequestDiff(owner: string, repo: string, prNumber: number): Promise<string> {
-    const response = await this.client.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
+    const response = await this.client.rest.pulls.get({
       owner,
       repo,
       pull_number: prNumber,
