@@ -46,6 +46,26 @@ const JobPacketSchema = z.object({ /* ... */ });
 const chatRoute = createRoute({ method: 'post', path: '/api/chat', request: { body: { content: { 'application/json': { schema: ChatRequestSchema }}}}, responses: { 200: { content: { 'application/json': { schema: ChatResponseSchema }}}}});
 app.openapi(chatRoute, async (c) => c.json(await handleChatRequest(c.env, c.req.valid('json').query, c.req.valid('json').sessionId)), authMiddleware);
 
+app.get('/api/chat/ws', authMiddleware, async (c) => {
+  const upgradeHeader = c.req.header('Upgrade');
+  if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+    return new Response('Expected Upgrade: websocket', { status: 426 });
+  }
+
+  const sessionId = crypto.randomUUID();
+  const actor = c.env.CHAT_SESSION_ACTOR.get(c.env.CHAT_SESSION_ACTOR.idFromName(sessionId));
+  const response = await actor.fetch('https://actor.local/ws', {
+    headers: { Upgrade: 'websocket' },
+  });
+
+  if (response.status !== 101 || !response.webSocket) {
+    return new Response('WebSocket upgrade failed', { status: 500 });
+  }
+
+  response.headers.set('x-session-id', sessionId);
+  return response;
+});
+
 const mcpRoute = createRoute({ method: 'post', path: '/mcp', request: { body: { content: { 'application/json': { schema: ChatRequestSchema }}}}, responses: { 200: { content: { 'application/json': { schema: ChatResponseSchema }}}}});
 app.openapi(mcpRoute, async (c) => c.json(await handleChatRequest(c.env, c.req.valid('json').query, c.req.valid('json').sessionId)), authMiddleware);
 
