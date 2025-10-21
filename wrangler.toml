@@ -1,6 +1,7 @@
 name = "cloudflare-docs-mcp"
 main = "src/index.ts"
 compatibility_date = "2024-06-20"
+compatibility_flags = ["nodejs_compat"]
 
 # Serve static files from the 'public' directory
 [assets]
