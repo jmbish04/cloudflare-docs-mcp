@@ -224,6 +224,8 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
           ? clarificationResult.structuredResult
           : undefined;
 
+      let clarificationMetadata: { needed: boolean; question?: string } = { needed: false };
+
       if (clarificationDecision?.needsClarification) {
         const question =
           clarificationDecision.clarifyingQuestion?.trim() || 'Could you please provide more details about what you need?';
@@ -234,7 +236,8 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
         const contextToStore =
           clarificationContext ?? ({ originalQuery: finalQuery, clarifications: [] } satisfies ClarificationContext);
         await this.state.storage.put(contextKey, contextToStore);
-        return { sessionId, response: question };
+        clarificationMetadata = { needed: true, question };
+        return { sessionId, response: question, clarification: clarificationMetadata };
       }
 
       await this.state.storage.delete(awaitingKey);
@@ -278,7 +281,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
         const errorMessage = "I'm sorry, I was unable to create a research plan.";
         await logTransaction(this.env, sessionId, 'ERROR_CREATE_PLAN', { error: planResult.error });
         this.sendUpdate('error', { message: errorMessage, details: planResult.error });
-        return { sessionId, response: errorMessage, error: planResult.error };
+        return { sessionId, response: errorMessage, error: planResult.error, clarification: clarificationMetadata };
       }
 
       const plan = planResult.structuredResult;
@@ -315,7 +318,18 @@ Synthesize a final answer.`;
 
       this.sendUpdate('final_response', { response: finalResponse });
 
-      return { sessionId, response: finalResponse };
+      const normalizedPlan = {
+        steps: plan.plan,
+        toolCalls: plan.tool_calls.map((call) => ({ tool: call.tool, args: call.args })),
+      };
+
+      return {
+        sessionId,
+        response: finalResponse,
+        plan: normalizedPlan,
+        tool_results: toolResults,
+        clarification: clarificationMetadata,
+      };
     } catch (error) {
       console.error('Unexpected error while handling user query:', error);
       const errorMessage = 'An unexpected error occurred while processing the query.';
@@ -323,7 +337,12 @@ Synthesize a final answer.`;
       await logTransaction(this.env, sessionId, 'UNEXPECTED_ERROR', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return { sessionId, response: errorMessage, error: error instanceof Error ? error.message : String(error) };
+      return {
+        sessionId,
+        response: errorMessage,
+        error: error instanceof Error ? error.message : String(error),
+        clarification: { needed: false },
+      };
     }
   }
 
