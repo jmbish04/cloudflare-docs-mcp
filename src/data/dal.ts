@@ -313,12 +313,34 @@ export class DataAccessLayer {
     const result = await this.db
       .prepare('SELECT id, title, tags, is_highlighted FROM curated_knowledge WHERE is_active = TRUE')
       .all();
-    return (result.results ?? []).map((row) => ({
-      id: row.id,
-      title: row.title,
-      tags: row.tags ?? null,
-      is_highlighted: this.toBoolean(row.is_highlighted ?? false),
-    }));
+    return (result.results ?? []).map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        id: Number(record.id),
+        title: String(record.title ?? ''),
+        tags: typeof record.tags === 'string' ? record.tags : record.tags == null ? null : String(record.tags),
+        is_highlighted: this.toBoolean((record.is_highlighted as unknown) ?? false),
+      } satisfies CuratedKnowledgeSummary;
+    });
+  }
+
+  async createCuratedKnowledge(entry: {
+    title: string;
+    content: string;
+    source_url?: string | null;
+    tags?: string | null;
+  }): Promise<CuratedKnowledge> {
+    const stmt = this.db.prepare(
+      `INSERT INTO curated_knowledge (title, content, source_url, tags)
+       VALUES (?, ?, ?, ?)
+       RETURNING *`
+    );
+    const result = await stmt
+      .bind(entry.title, entry.content, entry.source_url ?? null, entry.tags ?? null)
+      .all();
+    const row = result.results?.[0];
+    if (!row) throw new Error('Failed to create curated knowledge entry');
+    return this.mapCuratedKnowledge(row);
   }
 
   async setCuratedKnowledgeHighlight(id: number, highlighted: boolean, timestamp: string | null): Promise<void> {
@@ -331,6 +353,14 @@ export class DataAccessLayer {
   async getCuratedKnowledge(id: number): Promise<CuratedKnowledge | null> {
     const row = await this.db.prepare('SELECT * FROM curated_knowledge WHERE id = ?').bind(id).first();
     return row ? this.mapCuratedKnowledge(row) : null;
+  }
+
+  async getCuratedKnowledgeByIds(ids: number[]): Promise<CuratedKnowledge[]> {
+    if (!ids.length) return [];
+    const placeholders = ids.map(() => '?').join(', ');
+    const stmt = this.db.prepare(`SELECT * FROM curated_knowledge WHERE id IN (${placeholders})`);
+    const result = await stmt.bind(...ids).all();
+    return (result.results ?? []).map((row) => this.mapCuratedKnowledge(row));
   }
 
   async updateCuratedKnowledge(id: number, updates: Partial<Omit<CuratedKnowledge, 'id'>>): Promise<CuratedKnowledge | null> {

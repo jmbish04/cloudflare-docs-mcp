@@ -7,11 +7,14 @@ import { Actor, Persist } from '@cloudflare/actors';
 import { z } from 'zod';
 import type { ChatSessionActorEnv } from '../env';
 import { logTransaction } from '../data/d1';
+import { DataAccessLayer } from '../data/dal';
+import { VectorizeService } from '../data/vectorize_service';
 import { StructuredResponseTool, EmbeddingTool } from '../ai-tools';
 import { GitHubTool } from '../tools/github';
 import { BrowserRender } from '../tools/browser';
 import { SandboxTool } from '../tools/sandbox';
 import { CloudflareDocsTool } from '../tools/cloudflare_docs';
+import { RAGTool } from '../tools/rag_tool';
 
 const ToolCallSchema = z.object({
   tool: z.string().describe("The name of the tool to call."),
@@ -57,6 +60,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
   private browser: BrowserRender;
   private sandbox: SandboxTool;
   private cloudflareDocs: CloudflareDocsTool;
+  private ragTool: RAGTool;
 
   constructor(state: DurableObjectState, env: ChatSessionActorEnv) {
     super(state, env);
@@ -66,6 +70,9 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
     this.browser = new BrowserRender(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_API_TOKEN);
     this.sandbox = new SandboxTool(env.SANDBOX, `session-${this.state.id}`);
     this.cloudflareDocs = new CloudflareDocsTool(env.AI);
+    const dal = new DataAccessLayer(env.DB);
+    const vectorizeService = new VectorizeService(env.VECTORIZE_INDEX, env.AI, env.DEFAULT_MODEL_EMBEDDING);
+    this.ragTool = new RAGTool(vectorizeService, dal);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -213,9 +220,32 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
       await this.state.storage.delete(awaitingKey);
       await this.state.storage.delete(contextKey);
 
+      this.sendUpdate('status', { message: 'Searching knowledge base...' });
+      let knownContext = '';
+      try {
+        knownContext = await this.ragTool.searchKnowledgeBase(finalQuery);
+      } catch (error) {
+        console.error('RAG knowledge search failed:', error);
+        knownContext = 'No curated knowledge could be retrieved due to an internal error.';
+      }
+      this.sendUpdate('rag_result', { context: knownContext });
+
       this.sendUpdate('status', { message: 'Creating research plan...' });
 
-      const planPrompt = `Create a research plan to answer the query: "${finalQuery}".`;
+      const sanitizedContext = knownContext?.trim().length
+        ? knownContext
+        : 'No curated knowledge matched the query.';
+      const planPrompt = `
+        Based on the following known information, create a research plan to answer the user's query.
+        Only create steps for information that is missing.
+
+        Known Information:
+        ---
+        ${sanitizedContext}
+        ---
+
+        User Query: "${finalQuery}"
+      `.trim();
       const planResult = await this.structuredResponseTool.analyzeText(ResearchPlanSchema, planPrompt);
 
       if (!planResult.success || !planResult.structuredResult) {
