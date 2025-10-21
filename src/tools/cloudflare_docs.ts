@@ -19,8 +19,14 @@ export interface SearchResult {
  * The complete search results response.
  */
 export interface SearchResults {
+  /** The array of search result items. Empty if an error occurred. */
   results: SearchResult[];
+  /** The total number of results found. 0 if an error occurred. */
   totalResults: number;
+  /** Flag indicating if an error occurred during the search. */
+  isError: boolean;
+  /** A system message, typically containing error details if isError is true. */
+  systemMessage: string | null;
 }
 
 // --- CloudflareDocsTool Class ---
@@ -48,7 +54,7 @@ export class CloudflareDocsTool {
    * Vectorize index populated with Cloudflare documentation content.
    *
    * @param query The search query string.
-   * @returns A promise that resolves to the search results.
+   * @returns A promise that resolves to the search results, including error state.
    */
   async search(query: string): Promise<SearchResults> {
     try {
@@ -112,15 +118,21 @@ export class CloudflareDocsTool {
       return {
         results: filteredResults,
         totalResults: filteredResults.length,
+        isError: false,
+        systemMessage: null
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error searching Cloudflare Docs:', error);
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Return empty results on error rather than throwing
       // This allows the agent to continue processing even if search fails
       return {
         results: [],
         totalResults: 0,
+        isError: true,
+        systemMessage: `Error searching Cloudflare Docs: ${errorMessage}`
       };
     }
   }
