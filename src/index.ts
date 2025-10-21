@@ -26,6 +26,7 @@ import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
 import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
 import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
+import { VectorizeService } from './data/vectorize_service';
 
 const app = new OpenAPIHono<{ Bindings: Bindings }>();
 
@@ -133,6 +134,78 @@ app.post('/api/library/highlight', authMiddleware, async (c) => {
     return c.json({ status: 'ok' });
   }
   return c.json({ error: 'Source not supported' }, 400);
+});
+
+app.post('/api/curate', authMiddleware, async (c) => {
+  try {
+    const body = await c.req.json<Record<string, unknown>>();
+    const textValue = body['text'];
+    const contentValue = body['content'];
+    const rawText =
+      typeof textValue === 'string' && textValue.trim().length
+        ? textValue
+        : typeof contentValue === 'string'
+          ? contentValue
+          : '';
+    if (!rawText.trim()) {
+      return c.json({ error: 'Text content is required.' }, 400);
+    }
+
+    const titleValue = body['title'];
+    const title = typeof titleValue === 'string' && titleValue.trim().length ? titleValue.trim() : 'Untitled Entry';
+    const sourceUrlValue = body['sourceUrl'];
+    const sourceUrl =
+      typeof sourceUrlValue === 'string' && sourceUrlValue.trim().length ? sourceUrlValue.trim() : null;
+    let tags: string | null = null;
+    const tagsValue = body['tags'];
+    if (Array.isArray(tagsValue)) {
+      tags = tagsValue.map((tag: unknown) => (typeof tag === 'string' ? tag.trim() : '')).filter(Boolean).join(', ');
+    } else if (typeof tagsValue === 'string' && tagsValue.trim().length) {
+      tags = tagsValue.trim();
+    }
+
+    const dal = new DataAccessLayer(c.env.DB);
+    const record = await dal.createCuratedKnowledge({
+      title,
+      content: rawText.trim(),
+      source_url: sourceUrl,
+      tags,
+    });
+
+    const vectorizeService = new VectorizeService(c.env.VECTORIZE_INDEX, c.env.AI, c.env.DEFAULT_MODEL_EMBEDDING);
+    const metadataValue = body['metadata'];
+    const extraMetadata: Record<string, VectorizeVectorMetadata> =
+      metadataValue && typeof metadataValue === 'object' && metadataValue !== null && !Array.isArray(metadataValue)
+        ? Object.fromEntries(
+            Object.entries(metadataValue as Record<string, unknown>).filter(([, value]) => {
+              if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+                return true;
+              }
+              if (Array.isArray(value)) {
+                return value.every((item) => typeof item === 'string');
+              }
+              return false;
+            }),
+          )
+        : {};
+    await vectorizeService.upsertDocument({
+      id: String(record.id),
+      text: record.content,
+      metadata: {
+        title: record.title,
+        source_url: record.source_url,
+        tags: record.tags,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        ...extraMetadata,
+      },
+    });
+
+    return c.json({ id: record.id, status: 'indexed' }, 201);
+  } catch (error) {
+    console.error('Failed to curate knowledge:', error);
+    return c.json({ error: 'Failed to curate knowledge.' }, 500);
+  }
 });
 
 app.get('/api/library/d1', async (c) => {
