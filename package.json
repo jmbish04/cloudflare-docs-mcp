@@ -17,6 +17,7 @@
     "@cloudflare/actors": "^0.0.1-beta.6",
     "@cloudflare/sandbox": "^0.4.3",
     "@hono/zod-openapi": "^0.9.9",
+    "@octokit/rest": "^20.1.1",
     "ai": "^3.2.14",
     "cloudflare": "^5.2.0",
     "hono": "^4.4.3",

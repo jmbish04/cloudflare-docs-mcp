@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { ChatSessionActorEnv } from '../env';
 import { logTransaction } from '../data/d1';
 import { StructuredResponseTool, EmbeddingTool } from '../ai-tools';
-import { GitHubService } from '../tools/github';
+import { GitHubTool } from '../tools/github';
 import { BrowserRender } from '../tools/browser';
 import { SandboxTool } from '../tools/sandbox';
 import { CloudflareDocsTool } from '../tools/cloudflare_docs';
@@ -32,7 +32,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
   // Tooling Suite
   private structuredResponseTool: StructuredResponseTool;
   private embeddingTool: EmbeddingTool;
-  private github: GitHubService;
+  private github: GitHubTool;
   private browser: BrowserRender;
   private sandbox: SandboxTool;
   private cloudflareDocs: CloudflareDocsTool;
@@ -41,7 +41,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
     super(state, env);
     this.structuredResponseTool = new StructuredResponseTool(env as any);
     this.embeddingTool = new EmbeddingTool(env as any);
-    this.github = new GitHubService(env as any);
+    this.github = new GitHubTool(env as any);
     this.browser = new BrowserRender(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_API_TOKEN);
     this.sandbox = new SandboxTool(env.SANDBOX, `session-${this.state.id}`);
     this.cloudflareDocs = new CloudflareDocsTool(env.AI);
@@ -102,7 +102,21 @@ Synthesize a final answer.`;
 
   private async executeTool(toolName: string, args: any): Promise<any> {
     switch (toolName) {
-      case 'github_api': return this.github.getRepoContents(args.owner, args.repo, args.path);
+      case 'github_api':
+        switch (args.subcommand) {
+          case 'search_repos':
+            return this.github.searchRepositories(args.query, args.language, args.limit);
+          case 'search_issues':
+            return this.github.searchIssues(args.query, args.repo, args.limit);
+          case 'get_file_content':
+            return this.github.getFileContent(args.owner, args.repo, args.path);
+          case 'get_repo_contents':
+            return this.github.getRepoContents(args.owner, args.repo, args.path);
+          case 'get_pr_diff':
+            return this.github.getPullRequestDiff(args.owner, args.repo, args.prNumber);
+          default:
+            return { error: `GitHub subcommand ${args.subcommand} not found.` };
+        }
       case 'browser': return this.browser.scrape({ url: args.url, elements: args.elements });
       case 'sandbox': return this.sandbox.exec(args.command);
       case 'cloudflare_docs': return this.cloudflareDocs.search(args.query);
