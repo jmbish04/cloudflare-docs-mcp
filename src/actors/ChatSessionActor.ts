@@ -11,6 +11,7 @@ import { StructuredResponseTool, EmbeddingTool } from '../ai-tools';
 import { GitHubService } from '../tools/github';
 import { BrowserRender } from '../tools/browser';
 import { SandboxTool } from '../tools/sandbox';
+import { CloudflareDocsTool } from '../tools/cloudflare_docs';
 
 const ToolCallSchema = z.object({
   tool: z.string().describe("The name of the tool to call."),
@@ -34,6 +35,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
   private github: GitHubService;
   private browser: BrowserRender;
   private sandbox: SandboxTool;
+  private cloudflareDocs: CloudflareDocsTool;
 
   constructor(state: DurableObjectState, env: ChatSessionActorEnv) {
     super(state, env);
@@ -42,6 +44,7 @@ export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
     this.github = new GitHubService(env as any);
     this.browser = new BrowserRender(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_API_TOKEN);
     this.sandbox = new SandboxTool(env.SANDBOX, `session-${this.state.id}`);
+    this.cloudflareDocs = new CloudflareDocsTool(env.AI);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -102,6 +105,7 @@ Synthesize a final answer.`;
       case 'github_api': return this.github.getRepoContents(args.owner, args.repo, args.path);
       case 'browser': return this.browser.scrape({ url: args.url, elements: args.elements });
       case 'sandbox': return this.sandbox.exec(args.command);
+      case 'cloudflare_docs': return this.cloudflareDocs.search(args.query);
       // ... other tool cases
       default: return { error: `Tool ${toolName} not found.` };
     }
