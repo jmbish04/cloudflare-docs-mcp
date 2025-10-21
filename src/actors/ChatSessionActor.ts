@@ -1,83 +1,115 @@
 /**
- * ChatSessionActor persists conversational state for a single session ID.
- *
- * It orchestrates each turn by delegating to the DocsAgent helper which in
- * turn coordinates retrieval against the D1 corpus and optional LLM calls.
+ * @file src/actors/ChatSessionActor.ts
+ * @description The "General Research Agent" actor. It uses a suite of tools to answer user queries.
  */
 
 import { Actor, Persist } from '@cloudflare/actors';
-
-import { createDocsAgent, type AgentMessage } from '../agents/docsAgent';
+import { z } from 'zod';
 import type { ChatSessionActorEnv } from '../env';
+import { logTransaction } from '../data/d1';
+import { StructuredResponseTool, EmbeddingTool } from '../ai-tools';
+import { GitHubService } from '../tools/github';
+import { BrowserRender } from '../tools/browser';
+import { SandboxTool } from '../tools/sandbox';
 
-const MAX_HISTORY_LENGTH = 50;
+const ToolCallSchema = z.object({
+  tool: z.string().describe("The name of the tool to call."),
+  args: z.any().describe("The arguments to pass to the tool."),
+});
 
-type RpcEnvelope = {
-  method: 'handleUserQuery' | 'getHistory';
-  params?: Record<string, unknown>;
-};
+const ResearchPlanSchema = z.object({
+  plan: z.array(z.string()).describe("A step-by-step plan for how to answer the user's query."),
+  tool_calls: z.array(ToolCallSchema).describe("The sequence of tool calls required to execute the plan."),
+});
+
+interface AgentMessage { role: 'user' | 'assistant'; content: string; }
 
 export class ChatSessionActor extends Actor<ChatSessionActorEnv> {
-  // @ts-expect-error Decorators from @cloudflare/actors use TC39 semantics not yet modelled by tsc
-  @Persist
-  private messageHistory: AgentMessage[] = [];
+  // @ts-expect-error Decorators use TC39 semantics
+  @Persist private messageHistory: AgentMessage[] = [];
+  
+  // Tooling Suite
+  private structuredResponseTool: StructuredResponseTool;
+  private embeddingTool: EmbeddingTool;
+  private github: GitHubService;
+  private browser: BrowserRender;
+  private sandbox: SandboxTool;
 
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (request.method === 'POST' && url.pathname === '/rpc') {
-      const payload = (await request.json().catch(() => null)) as RpcEnvelope | null;
-      if (!payload || typeof payload.method !== 'string') {
-        return Response.json({ error: 'Invalid RPC payload.' }, { status: 400 });
-      }
-
-      if (payload.method === 'handleUserQuery') {
-        const sessionId = typeof payload.params?.sessionId === 'string' ? payload.params.sessionId : this.name;
-        const query = typeof payload.params?.query === 'string' ? payload.params.query : '';
-        if (!query.trim()) {
-          return Response.json({ error: 'Query must not be empty.' }, { status: 400 });
-        }
-        return Response.json(await this.handleUserQuery(sessionId ?? 'default', query));
-      }
-
-      if (payload.method === 'getHistory') {
-        return Response.json({ history: this.messageHistory });
-      }
-
-      return Response.json({ error: `Unknown RPC method ${payload.method}` }, { status: 400 });
-    }
-
-    if (request.method === 'GET' && url.pathname === '/status') {
-      return Response.json({ historyLength: this.messageHistory.length });
-    }
-
-    return Response.json({ error: 'Not Found' }, { status: 404 });
+  constructor(state: DurableObjectState, env: ChatSessionActorEnv) {
+    super(state, env);
+    this.structuredResponseTool = new StructuredResponseTool(env as any);
+    this.embeddingTool = new EmbeddingTool(env as any);
+    this.github = new GitHubService(env as any);
+    this.browser = new BrowserRender(env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_API_TOKEN);
+    this.sandbox = new SandboxTool(env.SANDBOX, `session-${this.state.id}`);
   }
 
-  async handleUserQuery(sessionId: string, query: string) {
-    const question = query.trim();
-    const userMessage: AgentMessage = { role: 'user', content: question };
-    const updatedHistory = [...this.messageHistory, userMessage];
+  async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
+    try {
+      const { query, sessionId } = (await request.json()) as { query: string; sessionId: string };
+      if (!query) return Response.json({ error: 'Query is required.' }, { status: 400 });
+      const result = await this.handleUserQuery(sessionId, query);
+      return Response.json(result);
+    } catch (error) {
+      console.error('Error in ChatSessionActor:', error);
+      return Response.json({ error: 'Failed to process chat request.' }, { status: 500 });
+    }
+  }
 
-    const agent = createDocsAgent(this.env);
-    console.log(JSON.stringify({ event: 'chat.turn.start', sessionId, messageCount: updatedHistory.length }));
-    const response = await agent.runConversation(updatedHistory);
+  async handleUserQuery(sessionId: string, query: string): Promise<object> {
+    await logTransaction(this.env, sessionId, 'USER_QUERY', { query });
+    this.messageHistory.push({ role: 'user', content: query });
 
-    const assistantMessage: AgentMessage = { role: 'assistant', content: response.answer };
-    this.messageHistory = [...updatedHistory, assistantMessage].slice(-MAX_HISTORY_LENGTH);
+    // Step 1: Create a research plan using the structured response tool.
+    const planPrompt = `Create a research plan to answer the query: "${query}".`;
+    const planResult = await this.structuredResponseTool.analyzeText(ResearchPlanSchema, planPrompt);
 
-    console.log(
-      JSON.stringify({
-        event: 'chat.turn.finish',
-        sessionId,
-        citations: response.citations.map((item) => item.url),
-      })
-    );
+    if (!planResult.success || !planResult.structuredResult) {
+      const error = "I'm sorry, I was unable to create a research plan.";
+      await logTransaction(this.env, sessionId, 'ERROR_CREATE_PLAN', { error: planResult.error });
+      return { sessionId, response: error, error: planResult.error };
+    }
+    const plan = planResult.structuredResult;
+    await logTransaction(this.env, sessionId, 'CREATE_PLAN', { plan });
 
-    return {
-      reply: response.answer,
-      citations: response.citations,
-      historyLength: this.messageHistory.length,
-    };
+    // Step 2: Execute the tool calls in the plan.
+    const toolResults = [];
+    for (const call of plan.tool_calls) {
+      const result = await this.executeTool(call.tool, call.args);
+      toolResults.push({ tool: call.tool, result });
+      await logTransaction(this.env, sessionId, `TOOL_RUN_${call.tool.toUpperCase()}`, { result });
+    }
+    
+    // Step 3: Synthesize the final response.
+    const synthesisPrompt = `Query: "${query}"
+
+Tool Results:
+${JSON.stringify(toolResults, null, 2)}
+
+Synthesize a final answer.`;
+    const finalResponse = await this.runSynthesis(synthesisPrompt);
+    
+    // ... final logging and response formatting ...
+    await logTransaction(this.env, sessionId, 'FINAL_RESPONSE', { response: finalResponse });
+    this.messageHistory.push({ role: 'assistant', content: finalResponse });
+
+    return { sessionId, response: finalResponse };
+  }
+
+  private async executeTool(toolName: string, args: any): Promise<any> {
+    switch (toolName) {
+      case 'github_api': return this.github.getRepoContents(args.owner, args.repo, args.path);
+      case 'browser': return this.browser.scrape({ url: args.url, elements: args.elements });
+      case 'sandbox': return this.sandbox.exec(args.command);
+      // ... other tool cases
+      default: return { error: `Tool ${toolName} not found.` };
+    }
+  }
+
+  private async runSynthesis(prompt: string): Promise<string> {
+    const model = this.env.DEFAULT_MODEL_REASONING as keyof AiModels;
+    const response = await this.env.AI.run(model, { prompt });
+    return (response as { response?: string }).response || 'Failed to generate a response.';
   }
 }

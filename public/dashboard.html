@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - AI Research Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.css" rel="stylesheet" />
+</head>
+<body class="bg-gray-50 dark:bg-gray-900">
+    
+    <!-- Navbar will be injected by nav.js -->
+
+    <main class="p-4 sm:ml-64">
+        <div class="p-4 border-2 border-gray-200 border-dashed rounded-lg dark:border-gray-700 mt-14">
+            <h1 class="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Operational Dashboard</h1>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Health Status Card -->
+                <div class="bg-white p-6 rounded-lg shadow dark:bg-gray-800">
+                    <h2 class="text-lg font-medium text-gray-900 dark:text-white">System Health</h2>
+                    <button id="run-health-check" class="mt-2 text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 me-2 mb-2 dark:bg-blue-600 dark:hover:bg-blue-700 focus:outline-none dark:focus:ring-blue-800">Run Health Check</button>
+                    <pre id="health-output" class="mt-2 text-sm text-gray-800 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 p-2 rounded">Loading...</pre>
+                </div>
+
+                <!-- Feasibility Jobs Card -->
+                <div class="bg-white p-6 rounded-lg shadow dark:bg-gray-800">
+                    <h2 class="text-lg font-medium text-gray-900 dark:text-white">Feasibility Jobs</h2>
+                    <div id="jobs-list" class="mt-2 space-y-2"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/assets/js/nav.js"></script>
+    <script src="/assets/js/client.js"></script>
+    <script src="/assets/js/dashboard.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+</body>
+</html>

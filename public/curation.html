@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Curation Workspace - AI Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.css" rel="stylesheet" />
+</head>
+<body class="bg-gray-100 dark:bg-gray-900">
+
+    <!-- Navbar will be injected by nav.js -->
+
+    <main class="p-4 md:ml-64">
+        <div class="mt-14 grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- Data Tables Column -->
+            <div class="lg:col-span-2 space-y-4">
+                <div>
+                    <h2 class="text-xl font-bold mb-2 text-gray-900 dark:text-white">Curated Knowledge (D1)</h2>
+                    <div id="d1-table" class="relative overflow-x-auto shadow-md sm:rounded-lg h-64"></div>
+                </div>
+                <div>
+                    <h2 class="text-xl font-bold mb-2 text-gray-900 dark:text-white">Cached Items (KV)</h2>
+                    <div id="kv-table" class="relative overflow-x-auto shadow-md sm:rounded-lg h-64"></div>
+                </div>
+            </div>
+
+            <!-- Chat Column -->
+            <div class="lg:col-span-1">
+                <h2 class="text-xl font-bold mb-2 text-gray-900 dark:text-white">Curation Chat</h2>
+                <div id="chat-container-curate" class="flex flex-col h-[80vh]">
+                    <div id="chat-messages-curate" class="flex-1 overflow-y-auto p-4 border rounded-lg dark:border-gray-600 bg-gray-50 dark:bg-gray-800"></div>
+                    <form id="chat-form-curate" class="mt-4 flex">
+                        <input type="text" id="chat-input-curate" class="w-full p-2 border rounded-l-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white" placeholder="Consolidate the highlighted items...">
+                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg">Send</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/assets/js/nav.js"></script>
+    <script src="/assets/js/client.js"></script>
+    <script src="/assets/js/curation.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
+</body>
+</html>

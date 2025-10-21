@@ -2,36 +2,86 @@ name = "cloudflare-docs-mcp"
 main = "src/index.ts"
 compatibility_date = "2024-06-20"
 
-[durable_objects]
-bindings = [
-  { name = "PRODUCT_SYNC_ACTOR", class_name = "ProductSyncActor" },
-  { name = "CHAT_SESSION_ACTOR", class_name = "ChatSessionActor" },
-]
+# Serve static files from the 'public' directory
+[assets]
+directory = "public"
+binding = "ASSETS"
 
+# Cron trigger for the daily health check
+[triggers]
+crons = ["0 0 * * *"] # Run once a day at midnight
+
+# Define the bindings for our Durable Objects.
+[[durable_objects.bindings]]
+name = "CHAT_SESSION_ACTOR"
+class_name = "ChatSessionActor"
+
+[[durable_objects.bindings]]
+name = "CODE_INGESTION_ACTOR"
+class_name = "CodeIngestionActor"
+
+[[durable_objects.bindings]]
+name = "FEASIBILITY_AGENT_ACTOR"
+class_name = "FeasibilityAgentActor"
+
+[[durable_objects.bindings]]
+name = "SANDBOX"
+class_name = "Sandbox"
+
+# Define the binding for our D1 database.
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudflare-docs-best-practices"
 database_id = "233820bc-7d62-46e1-b215-311479ae372f"
 migrations_dir = "migrations"
 
-[[migrations]]
-tag = "v2_actors_refactor"
-new_classes = ["ProductSyncActor", "ChatSessionActor"]
+# Define bindings for our producer queues.
+[[queues.producers]]
+queue = "code-ingestion-queue"
+binding = "CODE_INGESTION_QUEUE"
 
+[[queues.producers]]
+queue = "feasibility-queue"
+binding = "FEASIBILITY_QUEUE"
+
+# Define the binding for our KV namespace for caching.
+[[kv_namespaces]]
+binding = "AGENT_CACHE"
+id = "f8746207fbb74862850104458ef12673"
+
+# Define bindings for Cloudflare Workflows.
+[[workflows]]
+name = "research-workflow" # The name of the workflow
+binding = "RESEARCH_WORKFLOW" # The binding name used in the code
+class_name = "ResearchWorkflow" # The exported class name
+
+# Define environment variables for the worker.
 [vars]
-AI_MODEL = "@cf/openai/gpt-oss-120b"
+DEFAULT_MODEL_REASONING = "@cf/meta/llama-4-scout-17b-16e-instruct"
+DEFAULT_MODEL_STRUCTURED_RESPONSE = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+DEFAULT_MODEL_EMBEDDING = "@cf/baai/bge-large-en-v1.5"
+DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 
+# Enable observability features.
 [observability]
 enabled = true
 
-[[durable_objects.bindings]]
-name = "PRODUCT_SYNC_ACTOR"
-class_name = "ProductSyncActor"
-
-[[durable_objects.bindings]]
-name = "CHAT_SESSION_ACTOR"
-class_name = "ChatSessionActor"
+# Define migrations for our Durable Objects to handle state.
 
 [[migrations]]
-tag = "v2"
-new_classes = ["ProductSyncActor", "ChatSessionActor"]
+
+tag = "v1"
+
+new_classes = [ "ChatSessionActor", "CodeIngestionActor", "FeasibilityAgentActor" ]
+
+
+
+# Secrets are defined via `wrangler secret put <KEY>`
+
+# WORKER_API_KEY
+
+# GITHUB_TOKEN
+
+# CLOUDFLARE_ACCOUNT_ID
+
+# CLOUDFLARE_API_TOKEN

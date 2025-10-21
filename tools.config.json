@@ -1,0 +1,11 @@
+{
+  "comment": "This file defines the external MCP tools available to the AI Research Assistant.",
+  "tools": {
+    "cloudflare_docs": { "type": "mcp", "description": "Queries official Cloudflare documentation.", "endpoint": "https://docs.mcp.cloudflare.com/mcp" },
+    "bindings_service": { "type": "mcp", "description": "Interacts with Cloudflare bindings.", "endpoint": "https://bindings.mcp.cloudflare.com/mcp" },
+    "builds_service": { "type": "mcp", "description": "Interacts with Cloudflare builds.", "endpoint": "https://builds.mcp.cloudflare.com/mcp" },
+    "observability_service": { "type": "mcp", "description": "Accesses worker logs and analytics.", "endpoint": "https://observability.mcp.cloudflare.com/mcp" },
+    "containers_service": { "type": "mcp", "description": "Manages Cloudflare containers.", "endpoint": "https://containers.mcp.cloudflare.com/mcp" },
+    "context7": { "type": "mcp", "description": "A third-party knowledge source.", "command": "npx", "args": ["-y", "@upstash/context7-mcp"], "env_vars": ["CONTEXT7_API_KEY"] }
+  }
+}

@@ -1,146 +1,51 @@
 /**
- * Data access utilities for the D1-backed documentation corpus.
- *
- * These helpers are deliberately light-weight so they can be imported by
- * Workers, Actors, and Agents without creating cyclic dependencies.
+ * @file src/data/d1.ts
+ * @description This module provides a well-lit path for all interactions with the D1 database.
+ * It includes functions for logging transactions and querying the curated knowledge base.
  */
 
-export interface DocsDatabaseEnv {
-  /**
-   * Primary documentation database binding configured in wrangler.toml.
-   */
-  DB: D1Database;
-}
-
-export interface DocsSearchResult {
-  id: string;
-  product: string;
-  title: string;
-  url: string;
-  snippet: string;
-  score: number;
-}
-
-const DEFAULT_RESULT_LIMIT = 5;
+import type { CoreEnv } from '../env';
 
 /**
- * Perform a relevance-ranked search against the documentation corpus.
+ * @function logTransaction
+ * @description Logs a significant agent action to the 'transactions' table in D1.
+ * This creates an audit trail for every step the agent takes.
  *
- * The underlying schema exposes both a content table (`docs`) and an
- * FTS-backed virtual table (`docs_fts`). When the FTS table is unavailable
- * the helper degrades gracefully to a simple LIKE filter so reads never fail.
+ * @param {CoreEnv} env - The worker environment containing the D1 binding.
+ * @param {string} sessionId - The ID of the current chat session.
+ * @param {string} eventType - The type of event being logged (e.g., 'VECTOR_SEARCH').
+ * @param {object} eventData - A JSON object containing data relevant to the event.
+ * @returns {Promise<void>}
  */
-export async function searchDocs(
-  env: DocsDatabaseEnv,
-  q: string,
-  limit: number = DEFAULT_RESULT_LIMIT
-): Promise<DocsSearchResult[]> {
-  const query = q.trim();
-  if (!query) {
-    return [];
-  }
-
-  const resultLimit = normalizeLimit(limit);
-
-  const ftsResults = await queryWithFts(env, query, resultLimit);
-  if (ftsResults.length > 0) {
-    return ftsResults;
-  }
-
-  return queryWithFallback(env, query, resultLimit);
-}
-
-function normalizeLimit(limit: number | undefined): number {
-  if (!limit || Number.isNaN(limit)) {
-    return DEFAULT_RESULT_LIMIT;
-  }
-  return Math.min(Math.max(Math.floor(limit), 1), 20);
-}
-
-async function queryWithFts(env: DocsDatabaseEnv, query: string, limit: number) {
+export async function logTransaction(
+  env: CoreEnv,
+  sessionId: string,
+  eventType: string,
+  eventData: object
+): Promise<void> {
   try {
-    const statement = env.DB.prepare(
-      `SELECT d.id, d.product, d.title, d.url, d.snippet,
-              COALESCE(1.0 / (1.0 + bm25(docs_fts, 1.0, 0.2, 0.1)), 0) AS relevance
-         FROM docs_fts
-         JOIN docs d ON d.id = docs_fts.id
-        WHERE docs_fts MATCH ?1
-        ORDER BY relevance DESC
-        LIMIT ?2`
-    ).bind(query, limit);
-
-    const { results } = await statement.all<
-      Array<
-        [
-          string,
-          string,
-          string,
-          string,
-          string,
-          number
-        ]
-      >
-    >();
-
-    return (results ?? []).map((row, index) => {
-      const [id, product, title, url, snippet, relevance] = row as unknown as [
-        string,
-        string,
-        string,
-        string,
-        string,
-        number | null
-      ];
-      return {
-        id,
-        product,
-        title,
-        url,
-        snippet,
-        score: typeof relevance === 'number' && Number.isFinite(relevance)
-          ? relevance
-          : deriveFallbackScore(index),
-      } satisfies DocsSearchResult;
-    });
+    const stmt = env.DB.prepare(
+      'INSERT INTO transactions (session_id, event_type, event_data, status) VALUES (?, ?, ?, ?)'
+    );
+    await stmt.bind(sessionId, eventType, JSON.stringify(eventData), 'SUCCESS').run();
   } catch (error) {
-    console.warn('FTS search failed, falling back to LIKE query.', error);
-    return [];
+    console.error(`Failed to log transaction for session ${sessionId}:`, error);
+    // In a real-world scenario, you might want to have a fallback logging mechanism.
   }
 }
 
-async function queryWithFallback(env: DocsDatabaseEnv, query: string, limit: number) {
-  const wildcard = `%${query.replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
-  const statement = env.DB.prepare(
-    `SELECT id, product, title, url, snippet
-       FROM docs
-      WHERE title LIKE ?1 ESCAPE '\\' OR snippet LIKE ?1 ESCAPE '\\'
-      ORDER BY updated_at DESC
-      LIMIT ?2`
-  ).bind(wildcard, limit);
-
-  const { results } = await statement.all<
-    Array<[string, string, string, string, string]>
-  >();
-
-  return (results ?? []).map((row, index) => {
-    const [id, product, title, url, snippet] = row as unknown as [
-      string,
-      string,
-      string,
-      string,
-      string
-    ];
-    return {
-      id,
-      product,
-      title,
-      url,
-      snippet,
-      score: deriveFallbackScore(index),
-    } satisfies DocsSearchResult;
-  });
-}
-
-function deriveFallbackScore(rank: number) {
-  return Math.max(0, 1 - rank * 0.1);
+/**
+ * @function queryCuratedKnowledge
+ * @description Searches the 'curated_knowledge' table for best practices and gotchas.
+ *
+ * @param {CoreEnv} env - The worker environment containing the D1 binding.
+ * @param {string} query - The search query.
+ * @returns {Promise<Array<any>>} A promise that resolves to an array of matching knowledge entries.
+ */
+export async function queryCuratedKnowledge(env: CoreEnv, query: string): Promise<Array<any>> {
+  // This is a placeholder for a more sophisticated search.
+  // A real implementation would use full-text search or keyword matching against tags.
+  const stmt = env.DB.prepare('SELECT * FROM curated_knowledge WHERE content LIKE ? OR tags LIKE ?');
+  const { results } = await stmt.bind(`%${query}%`, `%${query}%`).all();
+  return results;
 }
