@@ -120,7 +120,7 @@ beforeAll(async () => {
   ({ ChatSessionActor } = await import('./ChatSessionActor'));
 });
 
-globalThis.WebSocketPair = class {
+vi.stubGlobal('WebSocketPair', class {
   readonly 0;
   readonly 1;
   constructor() {
@@ -131,7 +131,7 @@ globalThis.WebSocketPair = class {
     this[0] = client;
     this[1] = server;
   }
-};
+});
 
 class MockWebSocket {
   peer?: MockWebSocket;
