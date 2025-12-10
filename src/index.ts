@@ -23,6 +23,7 @@ import type { WorkerEnv, Bindings } from './env';
 import { ChatSessionActor } from './actors/ChatSessionActor';
 import { CodeIngestionActor } from './actors/CodeIngestionActor';
 import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
+import { ProductSyncActor } from './actors/ProductSyncActor';
 import { Sandbox } from '@cloudflare/sandbox';
 import { ResearchWorkflow } from './workflows/ResearchWorkflow';
 import { runHealthCheck } from './health';
@@ -828,4 +829,4 @@ export default {
   queue: (batch: MessageBatch, env: WorkerEnv, ctx: ExecutionContext) => { /* ... */ },
 };
 
-export { ChatSessionActor, CodeIngestionActor, FeasibilityAgentActor, Sandbox, ResearchWorkflow };
+export { ChatSessionActor, CodeIngestionActor, FeasibilityAgentActor, ProductSyncActor, Sandbox, ResearchWorkflow };
