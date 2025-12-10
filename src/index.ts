@@ -1,21 +1,21 @@
 /**
  * @file src/index.ts
  * @description
- *   This is the main entry point for the Cloudflare Docs AI/MCP Worker.
+ * This is the main entry point for the Cloudflare Docs AI/MCP Worker.
  *
- *   It exposes a unified API for AI-driven research, code analysis, and
- *   knowledge curation, leveraging Cloudflare's ecosystem of Workers AI,
- *   Durable Objects, D1, Vectorize, and Queues.
+ * It exposes a unified API for AI-driven research, code analysis, and
+ * knowledge curation, leveraging Cloudflare's ecosystem of Workers AI,
+ * Durable Objects, D1, Vectorize, and Queues.
  *
- *   The worker is architected around a set of stateful actors (Durable Objects)
- *   that manage long-running, complex tasks, ensuring resilience and
- *   scalability.
+ * The worker is architected around a set of stateful actors (Durable Objects)
+ * that manage long-running, complex tasks, ensuring resilience and
+ * scalability.
  *
  * @see
- *   - AGENTS.md: For an overview of the agentic architecture.
- *   - PRODUCT_VISION.md: For the high-level product goals.
- *   - GEMINI.md: For development context and conventions.
- *   - wrangler.toml: For configuration and bindings.
+ * - AGENTS.md: For an overview of the agentic architecture.
+ * - PRODUCT_VISION.md: For the high-level product goals.
+ * - GEMINI.md: For development context and conventions.
+ * - wrangler.toml: For configuration and bindings.
  */
 
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
@@ -23,6 +23,9 @@ import type { WorkerEnv, Bindings } from './env';
 import { ChatSessionActor } from './actors/ChatSessionActor';
 import { CodeIngestionActor } from './actors/CodeIngestionActor';
 import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
+import { ProductSyncActor } from './actors/ProductSyncActor'; // Restored Import
+import { Sandbox } from '@cloudflare/sandbox';
+export { ResearchWorkflow } from './workflows/research';
 import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
 import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
@@ -806,6 +809,13 @@ app.get('/healthz', (c) => c.json({ status: 'ok' }));
 
 app.doc('/openapi.json', { openapi: '3.1.0', info: { title: 'Cloudflare AI Research Assistant API', version: 'v1.0.0' }});
 
+// Serve static files from the ASSETS binding
+app.get('*', async (c) => {
+  const url = new URL(c.req.url);
+  const asset = await c.env.ASSETS.fetch(url);
+  return asset;
+});
+
 async function handleChatRequest(env: Bindings, query: string, sessionId?: string) {
   sessionId = sessionId || crypto.randomUUID();
   const actor = env.CHAT_SESSION_ACTOR.get(env.CHAT_SESSION_ACTOR.idFromName(sessionId));
@@ -819,4 +829,11 @@ export default {
   queue: (batch: MessageBatch, env: WorkerEnv, ctx: ExecutionContext) => { /* ... */ },
 };
 
-export { ChatSessionActor, CodeIngestionActor, FeasibilityAgentActor };
+export {
+  ChatSessionActor,
+  CodeIngestionActor,
+  FeasibilityAgentActor,
+  ProductSyncActor,
+  Sandbox,
+  researchWorkflow as ResearchWorkflow
+};

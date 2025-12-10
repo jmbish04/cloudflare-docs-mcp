@@ -1,6 +1,6 @@
 name = "cloudflare-docs-mcp"
 main = "src/index.ts"
-compatibility_date = "2024-06-20"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 # Serve static files from the 'public' directory
@@ -8,11 +8,15 @@ compatibility_flags = ["nodejs_compat"]
 directory = "public"
 binding = "ASSETS"
 
-# Cron trigger for the daily health check
-[triggers]
-crons = ["0 0 * * *"] # Run once a day at midnight
+# Enable observability
+[observability]
+enabled = true
 
-# Define the bindings for our Durable Objects.
+# Cron trigger
+[triggers]
+crons = ["0 0 * * *"]
+
+# --- Durable Objects ---
 [[durable_objects.bindings]]
 name = "CHAT_SESSION_ACTOR"
 class_name = "ChatSessionActor"
@@ -29,14 +33,14 @@ class_name = "FeasibilityAgentActor"
 name = "SANDBOX"
 class_name = "Sandbox"
 
-# Define the binding for our D1 database.
+# --- D1 Database ---
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudflare-docs-best-practices"
 database_id = "233820bc-7d62-46e1-b215-311479ae372f"
 migrations_dir = "migrations"
 
-# Define bindings for our producer queues.
+# --- Queues ---
 [[queues.producers]]
 queue = "code-ingestion-queue"
 binding = "CODE_INGESTION_QUEUE"
@@ -45,35 +49,40 @@ binding = "CODE_INGESTION_QUEUE"
 queue = "feasibility-queue"
 binding = "FEASIBILITY_QUEUE"
 
-# Define the binding for our KV namespace for caching.
+# --- KV Namespaces ---
 [[kv_namespaces]]
 binding = "AGENT_CACHE"
 id = "f8746207fbb74862850104458ef12673"
 
-# Define bindings for Cloudflare Workflows.
+# --- Workflows ---
 [[workflows]]
-name = "research-workflow" # The name of the workflow
-binding = "RESEARCH_WORKFLOW" # The binding name used in the code
-class_name = "ResearchWorkflow" # The exported class name
+name = "research-workflow"
+binding = "RESEARCH_WORKFLOW"
+class_name = "ResearchWorkflow"
 
-# Define environment variables for the worker.
+# --- AI & Vectorize (Added based on src/env.ts) ---
+[ai]
+binding = "AI"
+
+# wrangler vectorize create cloudflare-docs-mcp-index --preset @cf/baai/bge-large-en-v1.5
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "cloudflare-docs-mcp-index" # Ensure this matches your actual index name
+
+# --- Environment Variables ---
 [vars]
 DEFAULT_MODEL_REASONING = "@cf/meta/llama-4-scout-17b-16e-instruct"
 DEFAULT_MODEL_STRUCTURED_RESPONSE = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 DEFAULT_MODEL_EMBEDDING = "@cf/baai/bge-large-en-v1.5"
 DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 
-# Enable observability features.
-[observability]
-enabled = true
-
-# Define migrations for our Durable Objects to handle state.
+# Durable Objects migrations
 [[migrations]]
 tag = "v1"
-new_classes = [ "ChatSessionActor", "CodeIngestionActor", "FeasibilityAgentActor" ]
-
-# Secrets are defined via `wrangler secret put <KEY>`
-# WORKER_API_KEY
-# GITHUB_TOKEN
-# CLOUDFLARE_ACCOUNT_ID
-# CLOUDFLARE_API_TOKEN
+new_sqlite_classes = [
+  "ChatSessionActor",
+  "FeasibilityAgentActor",
+  "ProductSyncActor",
+  "CodeIngestionActor",
+  "Sandbox"
+]
