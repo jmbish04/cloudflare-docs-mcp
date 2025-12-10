@@ -30,6 +30,7 @@ import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
 import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
 import { VectorizeService } from './data/vectorize_service';
+export { researchWorkflow as ResearchWorkflow } from './workflows/research';
 
 const app = new OpenAPIHono<{ Bindings: Bindings }>();
 
