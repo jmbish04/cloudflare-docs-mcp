@@ -76,11 +76,16 @@ DEFAULT_MODEL_STRUCTURED_RESPONSE = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 DEFAULT_MODEL_EMBEDDING = "@cf/baai/bge-large-en-v1.5"
 DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 
-# --- Migrations ---
+# Durable Objects migrations
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["ChatSessionActor", "FeasibilityAgentActor"] # Removed stale ProductSyncActor
+new_sqlite_classes = ["ChatSessionActor", "FeasibilityAgentActor", "ProductSyncActor"] # RESTORED
 
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["CodeIngestionActor"]
+
+# If Sandbox is new, ensure it has a migration entry too
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Sandbox"]
