@@ -79,7 +79,12 @@ DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 # Durable Objects migrations
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["ChatSessionActor", "FeasibilityAgentActor", "ProductSyncActor", "CodeIngestionActor"] # RESTORED
+new_sqlite_classes = [
+  "ChatSessionActor",
+  "FeasibilityAgentActor",
+  "ProductSyncActor",
+  "CodeIngestionActor"
+]
 
 # If Sandbox is new, ensure it has a migration entry too
 [[migrations]]
