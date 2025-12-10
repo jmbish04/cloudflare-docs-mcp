@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+# Explicitly enable the workers.dev endpoint
+workers_dev = true
+
+# Explicitly enable preview URLs (e.g. for draft deployments)
+preview_urls = true
+
 # Serve static files from the 'public' directory
 [assets]
 directory = "public"
