@@ -83,10 +83,6 @@ new_sqlite_classes = [
   "ChatSessionActor",
   "FeasibilityAgentActor",
   "ProductSyncActor",
-  "CodeIngestionActor"
+  "CodeIngestionActor",
+  "Sandbox"
 ]
-
-# If Sandbox is new, ensure it has a migration entry too
-[[migrations]]
-tag = "v2"
-new_sqlite_classes = ["Sandbox"]
