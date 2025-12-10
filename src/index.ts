@@ -24,6 +24,7 @@ import { ChatSessionActor } from './actors/ChatSessionActor';
 import { CodeIngestionActor } from './actors/CodeIngestionActor';
 import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
 import { Sandbox } from '@cloudflare/sandbox';
+import { ResearchWorkflow } from './workflows/ResearchWorkflow';
 import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
 import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
@@ -820,4 +821,4 @@ export default {
   queue: (batch: MessageBatch, env: WorkerEnv, ctx: ExecutionContext) => { /* ... */ },
 };
 
-export { ChatSessionActor, CodeIngestionActor, FeasibilityAgentActor, Sandbox };
+export { ChatSessionActor, CodeIngestionActor, FeasibilityAgentActor, Sandbox, ResearchWorkflow };
