@@ -70,8 +70,12 @@ enabled = true
 # Durable Objects migrations
 # SQLite-based Durable Objects require new_sqlite_classes instead of new_classes
 [[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatSessionActor", "FeasibilityAgentActor", "ProductSyncActor"]
+
+[[migrations]]
 tag = "v2"
-new_sqlite_classes = ["ChatSessionActor", "CodeIngestionActor", "FeasibilityAgentActor", "ProductSyncActor"]
+new_sqlite_classes = ["CodeIngestionActor"]
 # Note: Sandbox is from @cloudflare/sandbox package and doesn't need migration
 
 # Secrets are defined via `wrangler secret put <KEY>`
