@@ -68,12 +68,10 @@ DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 enabled = true
 
 # Durable Objects migrations
-# These migrations declare the Durable Object classes used by this Worker.
-# If you encounter errors about classes "already depended on by existing Durable Objects",
-# you may need to use renamed_classes or transferred_classes migration instead.
+# SQLite-based Durable Objects require new_sqlite_classes instead of new_classes
 [[migrations]]
 tag = "v2"
-new_classes = ["ChatSessionActor", "CodeIngestionActor", "FeasibilityAgentActor", "ProductSyncActor"]
+new_sqlite_classes = ["ChatSessionActor", "CodeIngestionActor", "FeasibilityAgentActor", "ProductSyncActor"]
 # Note: Sandbox is from @cloudflare/sandbox package and doesn't need migration
 
 # Secrets are defined via `wrangler secret put <KEY>`
