@@ -1,21 +1,21 @@
 /**
  * @file src/index.ts
  * @description
- *   This is the main entry point for the Cloudflare Docs AI/MCP Worker.
+ * This is the main entry point for the Cloudflare Docs AI/MCP Worker.
  *
- *   It exposes a unified API for AI-driven research, code analysis, and
- *   knowledge curation, leveraging Cloudflare's ecosystem of Workers AI,
- *   Durable Objects, D1, Vectorize, and Queues.
+ * It exposes a unified API for AI-driven research, code analysis, and
+ * knowledge curation, leveraging Cloudflare's ecosystem of Workers AI,
+ * Durable Objects, D1, Vectorize, and Queues.
  *
- *   The worker is architected around a set of stateful actors (Durable Objects)
- *   that manage long-running, complex tasks, ensuring resilience and
- *   scalability.
+ * The worker is architected around a set of stateful actors (Durable Objects)
+ * that manage long-running, complex tasks, ensuring resilience and
+ * scalability.
  *
  * @see
- *   - AGENTS.md: For an overview of the agentic architecture.
- *   - PRODUCT_VISION.md: For the high-level product goals.
- *   - GEMINI.md: For development context and conventions.
- *   - wrangler.toml: For configuration and bindings.
+ * - AGENTS.md: For an overview of the agentic architecture.
+ * - PRODUCT_VISION.md: For the high-level product goals.
+ * - GEMINI.md: For development context and conventions.
+ * - wrangler.toml: For configuration and bindings.
  */
 
 import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
@@ -23,14 +23,13 @@ import type { WorkerEnv, Bindings } from './env';
 import { ChatSessionActor } from './actors/ChatSessionActor';
 import { CodeIngestionActor } from './actors/CodeIngestionActor';
 import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
-import { ProductSyncActor } from './actors/ProductSyncActor';
+// import { ProductSyncActor } from './actors/ProductSyncActor'; // Commented out: File appears missing in codebase
 import { Sandbox } from '@cloudflare/sandbox';
-import { ResearchWorkflow } from './workflows/ResearchWorkflow';
+import { researchWorkflow } from './workflows/research'; // Fixed import source
 import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
 import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
 import { VectorizeService } from './data/vectorize_service';
-export { researchWorkflow as ResearchWorkflow } from './workflows/research';
 
 const app = new OpenAPIHono<{ Bindings: Bindings }>();
 
@@ -830,4 +829,11 @@ export default {
   queue: (batch: MessageBatch, env: WorkerEnv, ctx: ExecutionContext) => { /* ... */ },
 };
 
-export { ChatSessionActor, CodeIngestionActor, FeasibilityAgentActor, ProductSyncActor, Sandbox, ResearchWorkflow };
+export {
+  ChatSessionActor,
+  CodeIngestionActor,
+  FeasibilityAgentActor,
+  // ProductSyncActor,
+  Sandbox,
+  researchWorkflow as ResearchWorkflow
+};
