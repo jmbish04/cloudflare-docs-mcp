@@ -67,11 +67,6 @@ DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 [observability]
 enabled = true
 
-# Define migrations for our Durable Objects to handle state.
-[[migrations]]
-tag = "v1"
-new_classes = [ "ChatSessionActor", "CodeIngestionActor", "FeasibilityAgentActor" ]
-
 # Secrets are defined via `wrangler secret put <KEY>`
 # WORKER_API_KEY
 # GITHUB_TOKEN

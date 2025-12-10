@@ -808,6 +808,13 @@ app.get('/healthz', (c) => c.json({ status: 'ok' }));
 
 app.doc('/openapi.json', { openapi: '3.1.0', info: { title: 'Cloudflare AI Research Assistant API', version: 'v1.0.0' }});
 
+// Serve static files from the ASSETS binding
+app.get('*', async (c) => {
+  const url = new URL(c.req.url);
+  const asset = await c.env.ASSETS.fetch(url);
+  return asset;
+});
+
 async function handleChatRequest(env: Bindings, query: string, sessionId?: string) {
   sessionId = sessionId || crypto.randomUUID();
   const actor = env.CHAT_SESSION_ACTOR.get(env.CHAT_SESSION_ACTOR.idFromName(sessionId));
