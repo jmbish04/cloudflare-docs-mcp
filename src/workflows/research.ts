@@ -11,6 +11,7 @@ import { searchCodeExamples } from '../data/vectorize';
 import { ToolService } from '../tools';
 
 // Define the shape of the input for this workflow
+// This matches what ChatSessionActor sends
 export type ResearchInput = {
   sessionId: string;
   query: string;
