@@ -23,9 +23,9 @@ import type { WorkerEnv, Bindings } from './env';
 import { ChatSessionActor } from './actors/ChatSessionActor';
 import { CodeIngestionActor } from './actors/CodeIngestionActor';
 import { FeasibilityAgentActor } from './actors/FeasibilityAgentActor';
-// import { ProductSyncActor } from './actors/ProductSyncActor'; // Commented out: File appears missing in codebase
+import { ProductSyncActor } from './actors/ProductSyncActor'; // Restored Import
 import { Sandbox } from '@cloudflare/sandbox';
-import { researchWorkflow } from './workflows/research'; // Fixed import source
+import { researchWorkflow } from './workflows/research'; 
 import { runHealthCheck } from './health';
 import { authMiddleware } from './auth';
 import { DataAccessLayer, type FeasibilityJobStatus } from './data/dal';
@@ -833,7 +833,7 @@ export {
   ChatSessionActor,
   CodeIngestionActor,
   FeasibilityAgentActor,
-  // ProductSyncActor,
+  ProductSyncActor,
   Sandbox,
   researchWorkflow as ResearchWorkflow
 };
