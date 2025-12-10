@@ -1,47 +1,22 @@
 name = "cloudflare-docs-mcp"
 main = "src/index.ts"
-compatibility_date = "2024-12-05" # Updated to ensure access to latest runtime features
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# Serve static files from the 'public' directory (Assets Binding)
+# Serve static files from the 'public' directory
 [assets]
 directory = "public"
 binding = "ASSETS"
 
-# Enable observability (Logs, Traces, Metrics)
+# Enable observability
 [observability]
 enabled = true
 
-# Cron trigger for the daily health check
+# Cron trigger
 [triggers]
-crons = ["0 0 * * *"] # Run once a day at midnight
-
-# --- Bindings ---
-
-# Workers AI (Required by src/env.ts 'AI')
-[ai]
-binding = "AI"
-
-# Vectorize (Required by src/env.ts 'VECTORIZE_INDEX')
-# wrangler vectorize create cloudflare-docs-mcp --preset @cf/baai/bge-large-en-v1.5
-[[vectorize]]
-binding = "VECTORIZE_INDEX"
-index_name = "cloudflare-docs-mcp" # TODO: Verify your actual index name via 'wrangler vectorize list'
-
-# D1 Database
-[[d1_databases]]
-binding = "DB"
-database_name = "cloudflare-docs-best-practices"
-database_id = "233820bc-7d62-46e1-b215-311479ae372f"
-migrations_dir = "migrations"
-
-# KV Namespace (Required by src/index.ts 'AGENT_CACHE')
-[[kv_namespaces]]
-binding = "AGENT_CACHE"
-id = "f8746207fbb74862850104458ef12673"
+crons = ["0 0 * * *"]
 
 # --- Durable Objects ---
-
 [[durable_objects.bindings]]
 name = "CHAT_SESSION_ACTOR"
 class_name = "ChatSessionActor"
@@ -54,14 +29,18 @@ class_name = "CodeIngestionActor"
 name = "FEASIBILITY_AGENT_ACTOR"
 class_name = "FeasibilityAgentActor"
 
-# Note: Ensure 'Sandbox' is exported in src/index.ts if using @cloudflare/sandbox
 [[durable_objects.bindings]]
 name = "SANDBOX"
 class_name = "Sandbox"
 
-# --- Queues ---
+# --- D1 Database ---
+[[d1_databases]]
+binding = "DB"
+database_name = "cloudflare-docs-best-practices"
+database_id = "233820bc-7d62-46e1-b215-311479ae372f"
+migrations_dir = "migrations"
 
-# Producers
+# --- Queues ---
 [[queues.producers]]
 queue = "code-ingestion-queue"
 binding = "CODE_INGESTION_QUEUE"
@@ -70,21 +49,27 @@ binding = "CODE_INGESTION_QUEUE"
 queue = "feasibility-queue"
 binding = "FEASIBILITY_QUEUE"
 
-# Consumer (Optional: Uncomment if this worker processes the queue)
-# [[queues.consumers]]
-# queue = "code-ingestion-queue"
-# max_batch_size = 5
-# max_batch_timeout = 5
+# --- KV Namespaces ---
+[[kv_namespaces]]
+binding = "AGENT_CACHE"
+id = "f8746207fbb74862850104458ef12673"
 
 # --- Workflows ---
-
 [[workflows]]
 name = "research-workflow"
 binding = "RESEARCH_WORKFLOW"
 class_name = "ResearchWorkflow"
 
-# --- Environment Variables ---
+# --- AI & Vectorize (Added based on src/env.ts) ---
+[ai]
+binding = "AI"
 
+# wrangler vectorize create cloudflare-docs-mcp-index --preset @cf/baai/bge-large-en-v1.5
+[[vectorize]]
+binding = "VECTORIZE_INDEX"
+index_name = "cloudflare-docs-mcp-index" # Ensure this matches your actual index name
+
+# --- Environment Variables ---
 [vars]
 DEFAULT_MODEL_REASONING = "@cf/meta/llama-4-scout-17b-16e-instruct"
 DEFAULT_MODEL_STRUCTURED_RESPONSE = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
@@ -92,17 +77,10 @@ DEFAULT_MODEL_EMBEDDING = "@cf/baai/bge-large-en-v1.5"
 DEFAULT_MODEL_RERANKER = "@cf/baai/bge-reranker-base"
 
 # --- Migrations ---
-
-# SQLite-based Durable Objects require new_sqlite_classes
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["ChatSessionActor", "FeasibilityAgentActor"] # Removed stale "ProductSyncActor"
+new_sqlite_classes = ["ChatSessionActor", "FeasibilityAgentActor"] # Removed stale ProductSyncActor
 
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["CodeIngestionActor"]
-
-# Sandbox requires a migration if it is a new Durable Object class
-[[migrations]]
-tag = "v3"
-new_sqlite_classes = ["Sandbox"]
